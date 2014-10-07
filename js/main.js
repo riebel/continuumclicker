@@ -1,5 +1,5 @@
 var Game = {
-	'version': 1,
+	'version': 2,
 	'now': function () {
 		return new Date();
 	},
