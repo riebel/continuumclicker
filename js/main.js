@@ -151,7 +151,7 @@ var Game = {
 		});
 	},
 	'save': function () {
-		localStorage[ "continuumClicker.game" ] = JSON.stringify(this);
+		localStorage[ "continuumClicker.game" ] = JSON.stringify( Game );
 		localStorage[ "continuumClicker.version" ] = Game.version;
 
 		$('<div class="save">').html('Game saved').appendTo('body').fadeIn('slow', function () {
