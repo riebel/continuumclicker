@@ -1,0 +1,210 @@
+body {
+    background-color: #000;
+    font-size: 10px;
+    font-family: 'Source Sans Pro', sans-serif;
+
+}
+
+* {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
+#spaceship {
+    display: block;
+    width: 800px;
+    height: 800px;
+    position: absolute;
+    top: 100%;
+    left: -400px;
+    /*margin: -360px 0 0 -400px;*/
+    background: transparent url(../img/spaceship.png) 0 0 no-repeat;
+    background-size: cover;
+
+    cursor: pointer;
+    z-index: 1;
+}
+
+.gameInfo {
+    display: block;
+    position: absolute;
+    height: 80px;
+    width: 800px;
+    left: 50%;
+    margin-left: -400px;
+
+    text-align: center;
+    font-size: 300%;
+    font-weight: bold;
+
+    color: #fff;
+    text-shadow: 0 0 5px black;
+
+    z-index: 2;
+}
+
+.gameInfo.top {
+    top: 20px;
+}
+
+.gameInfo.bottom {
+    bottom: 20px;
+}
+
+.gameInfo span {
+    display: block;
+}
+
+#energy {
+
+}
+
+#energyPerSecond {
+
+}
+
+#speed {
+
+
+}
+
+#distance {
+
+}
+
+#upgrades {
+    display: block;
+    list-style: none inside ;
+    position: absolute;
+    left: 20px;
+    top: 20px;
+    margin: 0;
+    padding: 0;
+
+
+    /*text-align: center;*/
+    font-size: 166%;
+    font-weight: bold;
+
+    color: #fff;
+    text-shadow: 0 0 5px black;
+
+    background-color: rgba(200,200,255,0.1);
+    border-radius: 10px;
+    overflow: hidden;
+
+
+    cursor: pointer;
+    z-index: 2;
+
+}
+
+#upgrades li {
+    padding: 5px 30px;
+    /*display: block;*/
+    clear: both;
+    border-bottom: 1px solid rgba(200,200,255,0.1);
+}
+
+#upgrades .cost, #speedLevels .cost{
+    float: right;
+    font-size: 75%;
+    /*line-height: 200%;*/
+    margin-left: 20px;
+
+}
+#upgrades .name, #speedLevels .name{
+    /*float: left;*/
+    /*line-height: 200%;*/
+
+}
+#speedLevels {
+    display: block;
+    list-style: none inside ;
+    position: absolute;
+    right: 20px;
+    top: 20px;
+    margin:0;
+    padding: 0;
+
+
+    /*text-align: center;*/
+    font-size: 166%;
+    font-weight: bold;
+
+    color: #fff;
+    text-shadow: 0 0 5px black;
+
+    background-color: rgba(200,200,255,0.1);
+    border-radius: 10px;
+    overflow: hidden;
+
+
+    cursor: pointer;
+    z-index: 2;
+
+}
+
+#speedLevels li {
+    padding: 5px 30px;
+    display: block;
+    clear: both;
+    border-bottom: 1px solid rgba(200,200,255,0.1);
+}
+
+#upgrades li:hover, #speedLevels li:hover {
+    background-color: rgba(200,200,255,0.2) !important;
+}
+
+.info {
+    padding: 0 30px;
+    display: block;
+    height: 0;
+    overflow: hidden;
+}
+
+li:hover .info {
+    padding: 5px 0;
+    height: auto;
+    width: 100%;
+}
+
+div.clickParticle {
+    display: block;
+    font-size: 300%;
+    font-weight: bold;
+
+    font-style: italic;
+    color: #fff;
+    text-shadow: 0 0 5px black;
+    position: fixed;
+
+
+
+    cursor: pointer;
+    z-index: 3;
+
+}
+
+.save {
+    position: absolute;
+    padding: 5px 30px;
+    bottom: 20px;
+    left: 20px;
+
+    /*text-align: center;*/
+    font-size: 166%;
+    font-weight: bold;
+
+    color: #fff;
+    text-shadow: 0 0 5px black;
+
+    background-color: rgba(200,200,255,0.1);
+    border-radius: 10px;
+    z-index: 2;
+    display: none;
+}

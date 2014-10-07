@@ -1,0 +1,28 @@
+{
+  "name": "continuumClicker",
+  "version": "0.0.1",
+  "authors": [
+    "Hagen Sommerkorn <hagen.sommerkorn@gmail.com>"
+  ],
+  "description": "click the universe",
+  "main": "index.html",
+  "moduleType": [
+    "amd"
+  ],
+  "keywords": [
+    "click"
+  ],
+  "license": "MIT",
+  "private": true,
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ],
+  "dependencies": {
+    "jquery": "~2.1.1",
+    "rivets": "~0.6.10"
+  }
+}

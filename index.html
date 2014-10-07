@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+    <title>Continuum Clicker</title>
+    <link href='http://fonts.googleapis.com/css?family=Source+Sans+Pro:400,400italic,700,700italic' rel='stylesheet' type='text/css'>
+    <script type="application/javascript" src="bower_components/jquery/dist/jquery.js"></script>
+    <script type="application/javascript" src="bower_components/rivets/dist/rivets.js"></script>
+    <script type="application/javascript" src="js/helper.js"></script>
+    <script type="application/javascript" src="js/speedlevels.js"></script>
+    <script type="application/javascript" src="js/upgrades.js"></script>
+    <script type="application/javascript" src="js/main.js"></script>
+    <link href="css/styles.css" type="text/css" rel="stylesheet">
+</head>
+<body id="game">
+<canvas id="c" width="100%" height="100%"></canvas>
+<div class="gameInfo top">
+    <span id="energy">{ game.totalEnergy | beautify 1 } energy</span>
+    <span id="energyPerSecond">{ game.energyPerSecond | beautify 1 } eps (- { game.energyCostPerSecond | beautify 1 } eps)</span>
+</div>
+
+<ul id="upgrades">
+    <li rv-each-upgrade="game.upgrades" rv-on-click="controller.buy" rv-color="upgrade.color">
+        <span class="name">{ upgrade.level }x { upgrade.name }</span>
+        <span class="cost">{ upgrade.cost | beautify 1 }</span>
+        <span class="info">produces { upgrade.energy | beautify 1 } eps</span>
+    </li>
+</ul>
+<ul id="speedLevels">
+    <li rv-each-speed="game.speedLevels" rv-on-click="controller.setSpeed" rv-color="speed.color" rv-bgcolor="speed.bgcolor">
+        <span class="name">{ speed.name }</span>
+        <span class="cost">{ speed.cost | beautify 1 }</span>
+        <span class="info">{ speed.calculatedSpeed | beautify 1 } km/h</span>
+    </li>
+</ul>
+<div id="spaceship"></div>
+<div class="gameInfo bottom">
+    <span id="speed">{ game.speed | beautify } km/h</span>
+    <span id="distance">{ game.distance | beautify } km</span>
+</div>
+<script type="application/javascript" src="js/starfield.js"></script>
+</body>
+</html>
