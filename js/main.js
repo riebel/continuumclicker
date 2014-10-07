@@ -256,7 +256,7 @@ var Game = {
 
 		setInterval(function () {
 			Game.save();
-		}, 10000);
+		}, 30000);
 	}
 };
 
