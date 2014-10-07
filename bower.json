@@ -4,7 +4,7 @@
   "authors": [
     "Hagen Sommerkorn <hagen.sommerkorn@gmail.com>"
   ],
-  "description": "click the universe",
+  "description": "To boldly click where no man has clicked before",
   "main": "index.html",
   "moduleType": [
     "amd"
