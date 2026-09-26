@@ -1,12 +1,12 @@
 import { Gauge, Zap } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { cn } from './ui/cn'
 import { EnergyReadout, FlightReadout } from './ui/Hud'
 import { Menu } from './ui/Menu'
 import { Notices } from './ui/Notices'
-import { Ship } from './ui/Ship'
+import { type SceneState, Ship } from './ui/Ship'
+import { ShipStage, supportsWebGL } from './ui/ShipStage'
 import { SpeedPanel } from './ui/SpeedPanel'
-import { Starfield } from './ui/Starfield'
 import { UpgradePanel } from './ui/UpgradePanel'
 import { useGameLoop } from './ui/useGameLoop'
 
@@ -21,10 +21,20 @@ export function App() {
   useGameLoop()
   // On small screens only one panel fits; on large screens both are always visible.
   const [tab, setTab] = useState<Tab>('upgrades')
+  const shipRef = useRef<HTMLButtonElement>(null)
+  const [scene, setScene] = useState<SceneState>(() =>
+    supportsWebGL() ? 'loading' : 'unavailable',
+  )
 
   return (
     <>
-      <Starfield />
+      {scene !== 'unavailable' && (
+        <ShipStage
+          anchor={shipRef}
+          onReady={() => setScene('ready')}
+          onUnavailable={() => setScene('unavailable')}
+        />
+      )}
       <main className="relative z-10 flex h-dvh flex-col gap-3 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:grid lg:grid-cols-[minmax(17rem,22rem)_1fr_minmax(17rem,22rem)] lg:grid-rows-[minmax(0,1fr)] lg:gap-6 lg:p-6">
         <div className={cn('flex min-h-0 items-start', tab !== 'upgrades' && 'max-lg:hidden')}>
           <UpgradePanel />
@@ -36,7 +46,7 @@ export function App() {
           </div>
           <EnergyReadout />
           <div className="flex min-h-0 w-full flex-1 items-center justify-center [container-type:size]">
-            <Ship />
+            <Ship ref={shipRef} scene={scene} />
           </div>
           <FlightReadout />
         </section>

@@ -1,8 +1,30 @@
-import { UPGRADES, type UpgradeDef, type UpgradeId } from '../game/content'
-import { upgradeCost } from '../game/engine'
+import { UPGRADES, type UpgradeDef, type UpgradeId, VISUAL_TIER_THRESHOLDS } from '../game/content'
+import { nextVisualTierAt, upgradeCost, visualTier } from '../game/engine'
 import { formatNumber } from '../game/format'
 import { useActions, useGame } from '../game/store'
 import { cn } from './cn'
+
+/** Five pips: how many of this upgrade's ship modules are installed. */
+function ModulePips({ owned }: { owned: number }) {
+  const tier = visualTier(owned)
+  const next = nextVisualTierAt(owned)
+  const label = `Ship module ${tier} of ${VISUAL_TIER_THRESHOLDS.length}${next ? `, next at ${next} owned` : ''}`
+  return (
+    <span className="flex shrink-0 items-center gap-1" title={label}>
+      <span className="sr-only">{label}</span>
+      {VISUAL_TIER_THRESHOLDS.map((threshold, i) => (
+        <span
+          key={threshold}
+          aria-hidden="true"
+          className={cn(
+            'size-1.5 rounded-full transition-colors duration-500',
+            i < tier ? 'bg-energy shadow-[0_0_6px_var(--color-energy)]' : 'bg-white/15',
+          )}
+        />
+      ))}
+    </span>
+  )
+}
 
 function UpgradeRow({ upgrade }: { upgrade: UpgradeDef & { id: UpgradeId } }) {
   const { buy } = useActions()
@@ -38,9 +60,12 @@ function UpgradeRow({ upgrade }: { upgrade: UpgradeDef & { id: UpgradeId } }) {
             <span className="sr-only"> energy</span>
           </span>
         </span>
-        <span className="relative block text-sm text-white/55">
-          +{formatNumber(upgrade.eps, { decimals: 1 })}/s each
-          {owned > 0 && ` · ${formatNumber(upgrade.eps * owned, { decimals: 1 })}/s total`}
+        <span className="relative flex items-center justify-between gap-3 text-sm text-white/55">
+          <span>
+            +{formatNumber(upgrade.eps, { decimals: 1 })}/s each
+            {owned > 0 && ` · ${formatNumber(upgrade.eps * owned, { decimals: 1 })}/s total`}
+          </span>
+          <ModulePips owned={owned} />
         </span>
       </button>
     </li>

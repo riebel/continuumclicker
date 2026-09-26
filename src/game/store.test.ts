@@ -37,6 +37,18 @@ describe('game store', () => {
     expect(store.getState().notices[0]?.title).toMatch(/away for 1 h/)
   })
 
+  it('announces newly installed ship modules', () => {
+    const store = createGameStore(memoryStorage(), 0)
+    store.setState((s) => ({ game: { ...s.game, energy: 1000 } }))
+    store.getState().actions.buy('avidyne-engine')
+    expect(store.getState().notices.at(-1)?.title).toBe(
+      'Ship upgraded: Avidyne engine module 1/5 installed',
+    )
+    const count = store.getState().notices.length
+    store.getState().actions.buy('avidyne-engine')
+    expect(store.getState().notices).toHaveLength(count)
+  })
+
   it('saves on demand and can be reset', () => {
     const storage = memoryStorage()
     const store = createGameStore(storage, 0)

@@ -1,8 +1,11 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { gameStore } from './game/store'
+
+// jsdom has no WebGL; the 3D scene is covered by the browser checks.
+vi.mock('./scene/ShipScene', () => ({ default: () => null }))
 
 const setEnergy = (energy: number) => gameStore.setState((s) => ({ game: { ...s.game, energy } }))
 
@@ -44,6 +47,7 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: /avidyne engine/i }))
     expect(gameStore.getState().game.owned['avidyne-engine']).toBe(1)
     expect(await screen.findByText('1×')).toBeInTheDocument()
+    expect(screen.getAllByText('Ship module 1 of 5, next at 5 owned')).toHaveLength(1)
   })
 
   it('engages a speed level', async () => {

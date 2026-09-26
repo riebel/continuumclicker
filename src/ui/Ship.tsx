@@ -1,8 +1,11 @@
 import { m, useReducedMotion } from 'motion/react'
-import { type MouseEvent, useRef, useState } from 'react'
-import shipUrl from '../assets/spaceship.webp'
+import { type MouseEvent, type Ref, useRef, useState } from 'react'
+import posterUrl from '../assets/ship-poster.webp'
 import { formatNumber } from '../game/format'
 import { useActions } from '../game/store'
+import { cn } from './cn'
+
+export type SceneState = 'loading' | 'ready' | 'unavailable'
 
 interface Particle {
   id: number
@@ -17,8 +20,16 @@ interface Particle {
 
 const MAX_PARTICLES = 40
 
-/** The big clickable ship. Every click feeds the reactors; 5% of clicks are critical. */
-export function Ship() {
+interface ShipProps {
+  ref: Ref<HTMLButtonElement>
+  scene: SceneState
+}
+
+/**
+ * The clickable ship. The 3D model is rendered by the WebGL scene behind the UI and fitted into
+ * this button's box; the button itself stays a plain, keyboard-accessible control.
+ */
+export function Ship({ ref, scene }: ShipProps) {
   const actions = useActions()
   const reducedMotion = useReducedMotion()
   const [particles, setParticles] = useState<Particle[]>([])
@@ -46,32 +57,36 @@ export function Ship() {
 
   return (
     <>
-      <m.button
+      <button
+        ref={ref}
         type="button"
         onClick={onClick}
         aria-label="Feed the reactors: click the ship to generate energy"
-        className="relative aspect-square w-[min(100cqw,100cqh,44rem)] cursor-pointer touch-manipulation rounded-full"
-        animate={reducedMotion ? {} : { x: [0, 8, -6, 0], y: [0, -14, 6, 0] }}
-        transition={{ duration: 9, repeat: Number.POSITIVE_INFINITY, ease: 'easeInOut' }}
-        whileTap={{ scale: 0.97 }}
+        className="relative aspect-square w-[min(100cqw,100cqh,44rem)] cursor-pointer touch-manipulation rounded-full active:scale-[0.99]"
       >
-        <img
-          src={shipUrl}
-          alt=""
-          draggable={false}
-          className="pointer-events-none size-full object-contain drop-shadow-[0_0_40px_rgba(255,190,60,0.25)]"
-        />
-      </m.button>
+        {scene === 'unavailable' && (
+          <img
+            src={posterUrl}
+            alt=""
+            draggable={false}
+            className="pointer-events-none size-full object-contain"
+          />
+        )}
+        {scene === 'loading' && (
+          <span className="glow animate-pulse text-sm font-semibold tracking-widest text-white/50 uppercase">
+            Spooling up reactors…
+          </span>
+        )}
+      </button>
 
       <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-30 overflow-hidden">
         {particles.map((p) => (
           <m.span
             key={p.id}
-            className={
-              p.critical
-                ? 'glow absolute -translate-1/2 text-7xl font-black italic text-energy'
-                : 'glow absolute -translate-1/2 text-3xl font-bold italic text-white'
-            }
+            className={cn(
+              'glow absolute -translate-1/2 italic',
+              p.critical ? 'text-7xl font-black text-energy' : 'text-3xl font-bold text-white',
+            )}
             style={{ left: p.x, top: p.y }}
             initial={{ opacity: 1, x: 0, y: 0, scale: p.critical ? 0.6 : 0.8 }}
             animate={

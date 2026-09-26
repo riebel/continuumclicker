@@ -51,6 +51,12 @@ export const UPGRADES = [
 
 export type UpgradeId = (typeof UPGRADES)[number]['id']
 
+/**
+ * Every upgrade has a module on the 3D ship (see blender/build_ship.py). Its next tier appears
+ * when the owned count reaches the next threshold.
+ */
+export const VISUAL_TIER_THRESHOLDS = [1, 5, 10, 25, 50] as const
+
 const level = (id: string, name: string, c: number): SpeedLevelDef => ({
   id,
   name,

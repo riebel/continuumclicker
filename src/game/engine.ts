@@ -8,6 +8,7 @@ import {
   UPGRADES,
   type UpgradeDef,
   type UpgradeId,
+  VISUAL_TIER_THRESHOLDS,
 } from './content'
 
 export interface GameState {
@@ -36,6 +37,16 @@ export function createInitialState(): GameState {
 
 export function upgradeCost(upgrade: Pick<UpgradeDef, 'baseCost'>, owned: number): number {
   return upgrade.baseCost * COST_GROWTH ** owned
+}
+
+/** Number of ship module tiers unlocked by owning `owned` units of an upgrade (0-5). */
+export function visualTier(owned: number): number {
+  return VISUAL_TIER_THRESHOLDS.filter((threshold) => owned >= threshold).length
+}
+
+/** Owned count at which the next module tier appears, or null when fully built. */
+export function nextVisualTierAt(owned: number): number | null {
+  return VISUAL_TIER_THRESHOLDS.find((threshold) => owned < threshold) ?? null
 }
 
 export function speedLevelOf(state: GameState): SpeedLevelDef {

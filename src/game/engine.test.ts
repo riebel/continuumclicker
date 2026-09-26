@@ -9,10 +9,12 @@ import {
   engage,
   type GameState,
   netRate,
+  nextVisualTierAt,
   production,
   speedLevelStatus,
   sustainableLevel,
   upgradeCost,
+  visualTier,
   warpIntensity,
 } from './engine'
 
@@ -47,6 +49,21 @@ describe('upgrades', () => {
       owned: { ...createInitialState().owned, 'avidyne-engine': 10, 'driver-coil': 2 },
     })
     expect(production(state)).toBeCloseTo(10 * 0.1 + 2 * 4)
+  })
+})
+
+describe('ship modules', () => {
+  it.each([
+    [0, 0, 1],
+    [1, 1, 5],
+    [4, 1, 5],
+    [5, 2, 10],
+    [49, 4, 50],
+    [50, 5, null],
+    [500, 5, null],
+  ])('owning %d unlocks tier %d, next at %s', (owned, tier, next) => {
+    expect(visualTier(owned)).toBe(tier)
+    expect(nextVisualTierAt(owned)).toBe(next)
   })
 })
 

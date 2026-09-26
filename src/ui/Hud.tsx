@@ -10,7 +10,7 @@ export function EnergyReadout() {
   const net = produced - drained
 
   return (
-    <header className="glow text-center">
+    <header className="glow px-12 text-center lg:px-0">
       <h1 className="sr-only">Continuum Clicker</h1>
       <p className="text-4xl font-bold tabular-nums sm:text-5xl">
         {formatNumber(energy, { decimals: 1 })}

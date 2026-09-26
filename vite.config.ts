@@ -31,12 +31,18 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,webp,png,woff2}'],
+        globPatterns: ['**/*.{js,css,html,webp,png,woff2,glb}'],
+        // The 3D ship model and the three.js chunk exceed Workbox's 2 MiB default.
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         // The UI is English-only: skip font subsets the browser never downloads.
         globIgnores: ['**/*-{greek,greek-ext,cyrillic,cyrillic-ext,vietnamese}-*.woff2'],
       },
     }),
   ],
+  build: {
+    // three.js lives in its own lazily loaded chunk.
+    chunkSizeWarningLimit: 1300,
+  },
   test: {
     environment: 'jsdom',
     globals: true,

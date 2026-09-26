@@ -1,6 +1,6 @@
 import { useStore } from 'zustand'
 import { createStore } from 'zustand/vanilla'
-import { SPEED_LEVELS, type UpgradeId } from './content'
+import { SPEED_LEVELS, UPGRADES, type UpgradeId } from './content'
 import {
   advance,
   buyUpgrade,
@@ -9,6 +9,7 @@ import {
   createInitialState,
   engage,
   type GameState,
+  visualTier,
 } from './engine'
 import { formatDuration, formatNumber } from './format'
 import { browserStorage, clearSave, loadGame, saveGame } from './save'
@@ -98,7 +99,13 @@ export function createGameStore(storage: Storage = browserStorage(), now = Date.
 
         buy(id) {
           get().actions.tick()
+          const before = get().game.owned[id]
           set((s) => ({ game: buyUpgrade(s.game, id) }))
+          const tier = visualTier(get().game.owned[id])
+          if (tier > visualTier(before)) {
+            const name = UPGRADES.find((u) => u.id === id)?.name ?? id
+            notify({ kind: 'success', title: `Ship upgraded: ${name} module ${tier}/5 installed` })
+          }
         },
 
         engage(speedLevel) {
