@@ -1,0 +1,139 @@
+import { useStore } from 'zustand'
+import { createStore } from 'zustand/vanilla'
+import { SPEED_LEVELS, type UpgradeId } from './content'
+import {
+  advance,
+  buyUpgrade,
+  type ClickResult,
+  click,
+  createInitialState,
+  engage,
+  type GameState,
+} from './engine'
+import { formatDuration, formatNumber } from './format'
+import { browserStorage, clearSave, loadGame, saveGame } from './save'
+
+/** Gaps longer than this (tab in background, app closed) are reported as offline progress. */
+export const OFFLINE_REPORT_AFTER_MS = 60_000
+
+export type NoticeKind = 'info' | 'success' | 'warning'
+
+export interface Notice {
+  readonly id: number
+  readonly kind: NoticeKind
+  readonly title: string
+  readonly message?: string
+}
+
+export interface GameStore {
+  readonly game: GameState
+  /** Epoch ms up to which the simulation has been advanced. */
+  readonly lastTick: number
+  readonly notices: readonly Notice[]
+  readonly actions: {
+    tick(now?: number): void
+    click(random?: () => number): ClickResult
+    buy(id: UpgradeId): void
+    engage(speedLevel: number): void
+    save(options?: { announce?: boolean; now?: number }): void
+    reset(): void
+    notify(notice: Omit<Notice, 'id'>): void
+    dismiss(id: number): void
+  }
+}
+
+type Storage = Parameters<typeof saveGame>[0]
+
+export function createGameStore(storage: Storage = browserStorage(), now = Date.now()) {
+  const loaded = loadGame(storage, now)
+  let noticeId = 0
+
+  return createStore<GameStore>()((set, get) => {
+    const notify = (notice: Omit<Notice, 'id'>) => {
+      const id = ++noticeId
+      set((s) => ({ notices: [...s.notices.slice(-3), { ...notice, id }] }))
+    }
+
+    return {
+      game: loaded?.state ?? createInitialState(),
+      lastTick: loaded ? Math.min(loaded.savedAt, now) : now,
+      notices: [],
+      actions: {
+        tick(time = Date.now()) {
+          const { game, lastTick } = get()
+          const elapsedMs = time - lastTick
+          if (elapsedMs <= 0) {
+            // Clock went backwards (or no time passed): just resynchronise.
+            if (elapsedMs < 0) set({ lastTick: time })
+            return
+          }
+
+          const result = advance(game, elapsedMs / 1000)
+          set({ game: result.state, lastTick: time })
+
+          if (elapsedMs >= OFFLINE_REPORT_AFTER_MS) {
+            const earned = result.state.lifetimeEnergy - game.lifetimeEnergy
+            const travelled = result.state.distance - game.distance
+            notify({
+              kind: 'info',
+              title: `Welcome back, Captain. You were away for ${formatDuration(elapsedMs / 1000)}.`,
+              message: `Reactors produced ${formatNumber(earned)} energy and the ship travelled ${formatNumber(travelled)} km.`,
+            })
+          }
+          if (result.downshifted) {
+            notify({
+              kind: 'warning',
+              title: 'Energy reserves depleted',
+              message: `Dropped to ${SPEED_LEVELS[result.state.speedLevel]?.name ?? 'full stop'}, the fastest speed your reactors can sustain.`,
+            })
+          }
+        },
+
+        click(random) {
+          get().actions.tick()
+          const result = click(get().game, random)
+          set({ game: result.state })
+          return result
+        },
+
+        buy(id) {
+          get().actions.tick()
+          set((s) => ({ game: buyUpgrade(s.game, id) }))
+        },
+
+        engage(speedLevel) {
+          get().actions.tick()
+          set((s) => ({ game: engage(s.game, speedLevel) }))
+        },
+
+        save({ announce = false, now = Date.now() } = {}) {
+          get().actions.tick(now)
+          const ok = saveGame(storage, get().game, now)
+          if (!ok) notify({ kind: 'warning', title: 'Could not save — storage is unavailable.' })
+          else if (announce) notify({ kind: 'success', title: 'Game saved' })
+        },
+
+        reset() {
+          clearSave(storage)
+          set({ game: createInitialState(), lastTick: Date.now(), notices: [] })
+        },
+
+        notify,
+
+        dismiss(id) {
+          set((s) => ({ notices: s.notices.filter((n) => n.id !== id) }))
+        },
+      },
+    }
+  })
+}
+
+export type GameStoreApi = ReturnType<typeof createGameStore>
+
+export const gameStore = createGameStore()
+
+export function useGame<T>(selector: (store: GameStore) => T): T {
+  return useStore(gameStore, selector)
+}
+
+export const useActions = () => useGame((s) => s.actions)

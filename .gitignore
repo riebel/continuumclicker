@@ -1,2 +1,9 @@
+node_modules
+dist
+dev-dist
+coverage
+*.local
+.DS_Store
 .idea
-bower_components
+.vscode/*
+!.vscode/extensions.json

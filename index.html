@@ -1,42 +1,18 @@
 <!doctype html>
-<html>
-<head>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="description" content="To boldly click where no one has clicked before — an incremental space game." />
+    <meta name="theme-color" content="#05060f" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" type="image/png" href="/pwa-192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>Continuum Clicker</title>
-    <link href='http://fonts.googleapis.com/css?family=Source+Sans+Pro:400,400italic,700,700italic' rel='stylesheet' type='text/css'>
-    <link href="css/styles.css" type="text/css" rel="stylesheet">
-    <script type="application/javascript" src="bower_components/jquery/dist/jquery.js"></script>
-    <script type="application/javascript" src="bower_components/rivets/dist/rivets.js"></script>
-    <script type="application/javascript" src="js/helper.js"></script>
-    <script type="application/javascript" src="js/speedlevels.js"></script>
-    <script type="application/javascript" src="js/upgrades.js"></script>
-    <script type="application/javascript" src="js/main.js"></script>
-</head>
-<body id="game">
-<canvas id="c" width="100%" height="100%"></canvas>
-<div class="gameInfo top">
-    <span id="energy">{ game.totalEnergy | beautify 1 } energy</span>
-    <span id="energyPerSecond">{ game.energyPerSecond | beautify 1 } eps (- { game.energyCostPerSecond | beautify 1 } eps)</span>
-</div>
-
-<ul id="upgrades">
-    <li rv-each-upgrade="game.upgrades" rv-on-click="controller.buy" rv-color="upgrade.color">
-        <span class="name">{ upgrade.level }x { upgrade.name }</span>
-        <span class="cost">{ upgrade.cost | beautify 1 }</span>
-        <span class="info">produces { upgrade.energy | beautify 1 } eps</span>
-    </li>
-</ul>
-<ul id="speedLevels">
-    <li rv-each-speed="game.speedLevels" rv-on-click="controller.setSpeed" rv-color="speed.color" rv-bgcolor="speed.bgcolor">
-        <span class="name">{ speed.name }</span>
-        <span class="cost">{ speed.cost | beautify 1 }</span>
-        <span class="info">{ speed.calculatedSpeed | beautify 1 } km/h</span>
-    </li>
-</ul>
-<div id="spaceship"></div>
-<div class="gameInfo bottom">
-    <span id="speed">{ game.speed | beautify } km/h</span>
-    <span id="distance">{ game.distance | beautify } km</span>
-</div>
-<script type="application/javascript" src="js/starfield.js"></script>
-</body>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>Continuum Clicker needs JavaScript to fly.</noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

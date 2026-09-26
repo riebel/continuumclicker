@@ -1,0 +1,59 @@
+@import "tailwindcss";
+@import "@fontsource-variable/source-sans-3";
+
+@theme {
+  --font-sans: "Source Sans 3 Variable", ui-sans-serif, system-ui, sans-serif;
+  --color-space: #05060f;
+  --color-panel: rgb(200 200 255 / 0.07);
+  --color-panel-line: rgb(200 200 255 / 0.12);
+  --color-energy: #f5c542;
+  --color-burst: #ff8a3d;
+  --color-danger: #ff5a5a;
+  --color-ok: #6ee7a8;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background: var(--color-space);
+    color: white;
+    font-family: var(--font-sans);
+    overflow: hidden;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-energy);
+    outline-offset: 2px;
+  }
+
+  dialog::backdrop {
+    background: rgb(0 0 0 / 0.6);
+    backdrop-filter: blur(4px);
+  }
+}
+
+@utility glow {
+  text-shadow:
+    0 0 6px rgb(0 0 0 / 0.9),
+    0 0 18px rgb(0 0 0 / 0.6);
+}
+
+@utility panel {
+  border: 1px solid var(--color-panel-line);
+  background: var(--color-panel);
+  border-radius: var(--radius-2xl);
+  backdrop-filter: blur(6px);
+}
+
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(200 200 255 / 0.25) transparent;
+}
