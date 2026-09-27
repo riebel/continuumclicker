@@ -202,7 +202,7 @@ export function Ship({ anchor, reducedMotion }: ShipProps) {
       light.current.position
         .copy(temp.sum.divideScalar(engines))
         .addScaledVector(HEADING, -0.5 * size)
-      light.current.intensity = (0.6 + throttle.current * 2 + drive.boost) * size * size * 6
+      light.current.intensity = (0.6 + throttle.current * 2 + drive.boost) * size * size
       light.current.distance = size * 2.5
     }
 

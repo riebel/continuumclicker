@@ -50,7 +50,7 @@ export default function ShipScene({ anchor, reducedMotion, onReady }: ShipSceneP
       <Starfield intensity={intensity} reducedMotion={reducedMotion} />
 
       <ambientLight intensity={0.25} color="#8fa3d9" />
-      <directionalLight position={[14, 18, 20]} intensity={2.6} color="#e4ecff" />
+      <directionalLight position={[14, 18, 20]} intensity={3.4} color="#e4ecff" />
       <directionalLight position={[-20, 4, -14]} intensity={3.5} color="#7c95ff" />
       <Environment resolution={128} frames={1}>
         <Lightformer
@@ -62,8 +62,8 @@ export default function ShipScene({ anchor, reducedMotion, onReady }: ShipSceneP
         />
         <Lightformer
           form="rect"
-          intensity={0.7}
-          color="#ffb877"
+          intensity={0.6}
+          color="#e0d6c8"
           position={[-12, -6, 10]}
           scale={[12, 4, 1]}
         />

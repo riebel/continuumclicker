@@ -75,6 +75,7 @@ src/
 blender/
   build_ship.py Procedural, modular ship model → glTF
   render.py     Cycles stills: PWA icons and the no-WebGL fallback poster
+  run.mjs       Runs those scripts with a locally installed Blender
 ```
 
 The simulation in `engine.ts` (`advance`) is exact for any time step: the same code handles a
@@ -83,8 +84,11 @@ through.
 
 ### The 3D ship
 
-The ship is modelled in code: `blender/build_ship.py` builds the greebled hull and every upgrade
-module tier as separate objects, bakes ambient occlusion into vertex colours and exports glTF. Each
+The ship is modelled in code after the original 2014 artwork: `blender/build_ship.py` lofts the
+hull from rounded superellipse sections (two stacked engine barrels, a neck ringed by drums, a
+tapering spine that forks into twin booms) and covers it in layers of curved armour plates,
+transverse ribs, slats, pipes and hatches that follow the surface. It builds every upgrade module
+tier as a separate object, bakes ambient occlusion into vertex colours and exports glTF. Each
 module object carries `{"module": <upgrade id>, "tier": 1-5}` in its glTF extras; empties marked
 `{"nozzle": …, "radius": …}` locate the engine exhausts.
 
@@ -94,13 +98,15 @@ pass picks them up, and a point light at the engine cluster lights the hull. Thr
 engaged speed level and spikes briefly on every click. Browsers without WebGL 2 get a Cycles
 render of the ship instead.
 
-To change the model, edit the script and rebuild (requires Python 3.11 and Blender's Python module):
+To change the model, edit the script and rebuild with [Blender](https://www.blender.org/download/)
+5 or later (found in its default install location, or set `BLENDER` to its executable):
 
 ```sh
-pip install bpy==5.0.1
-npm run model                                   # → src/assets/ship.glb (meshopt compressed)
-python blender/render.py preview.png --tier 3   # Cycles still with modules up to tier 3
+npm run model                                         # → src/assets/ship.glb (meshopt compressed)
+node blender/run.mjs render.py preview.png --tier 3   # Cycles still with modules up to tier 3
 ```
+
+`blender/render.py` also lists the commands that render the poster and the PWA icons.
 
 ### Deployment
 
