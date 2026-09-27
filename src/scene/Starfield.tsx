@@ -58,8 +58,8 @@ const fragmentShader = /* glsl */ `
   varying float vFade;
 
   void main() {
-    float across = 1.0 - abs(vUv.y);
-    float along = 1.0 - vUv.x * 0.8;
+    float across = max(0.0, 1.0 - abs(vUv.y));
+    float along = max(0.0, 1.0 - vUv.x * 0.8);
     float alpha = across * along * vFade;
     gl_FragColor = vec4(vColor * alpha, alpha);
   }

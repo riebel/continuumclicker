@@ -47,23 +47,26 @@ const fragmentShader = /* glsl */ `
   varying vec3 vView;
 
   void main() {
+    // With MSAA, edge pixels are shaded slightly outside the triangle, so the interpolated vAlong can
+    // leave 0..1. pow() of a negative base is NaN, and bloom would smear a NaN over the whole frame.
+    float along = clamp(vAlong, 0.0, 1.0);
     // Soft volumetric edges: bright where we look through the thickest part of the plume.
     float facing = abs(dot(normalize(vNormal), normalize(vView)));
     float body = pow(facing, mix(1.6, 3.0, uCore));
-    float fade = pow(1.0 - vAlong, mix(1.4, 2.4, uCore)) * smoothstep(0.0, 0.04, vAlong + 0.02);
+    float fade = pow(1.0 - along, mix(1.4, 2.4, uCore)) * smoothstep(0.0, 0.04, along + 0.02);
 
-    float flicker = 0.88 + 0.12 * sin(uTime * 47.0 + uSeed * 9.0) * sin(uTime * 29.0 + vAlong * 18.0);
+    float flicker = 0.88 + 0.12 * sin(uTime * 47.0 + uSeed * 9.0) * sin(uTime * 29.0 + along * 18.0);
 
     // Mach diamonds: standing shock waves in the exhaust core at high thrust.
-    float diamonds = pow(max(0.0, cos(vAlong * uDiamonds * 6.2832)), 10.0)
-      * uCore * smoothstep(0.35, 0.9, uThrottle) * (1.0 - vAlong);
+    float diamonds = pow(max(0.0, cos(along * uDiamonds * 6.2832)), 10.0)
+      * uCore * smoothstep(0.35, 0.9, uThrottle) * (1.0 - along);
 
     vec3 hot = vec3(1.0, 0.93, 0.78);
     vec3 warm = vec3(1.0, 0.58, 0.16);
     vec3 cool = vec3(0.85, 0.22, 0.05);
-    vec3 color = mix(hot, warm, smoothstep(0.0, 0.35, vAlong));
-    color = mix(color, cool, smoothstep(0.3, 1.0, vAlong));
-    color = mix(color, hot, uCore * (1.0 - vAlong) * 0.7);
+    vec3 color = mix(hot, warm, smoothstep(0.0, 0.35, along));
+    color = mix(color, cool, smoothstep(0.3, 1.0, along));
+    color = mix(color, hot, uCore * (1.0 - along) * 0.7);
 
     float strength = (body * fade * flicker + diamonds * 1.5) * uIntensity;
     gl_FragColor = vec4(color * strength, 1.0);
