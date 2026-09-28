@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatAstronomical, formatDuration, formatNumber } from './format'
+import { formatAstronomical, formatDistance, formatDuration, formatNumber } from './format'
 
 describe('formatNumber', () => {
   it.each([
@@ -60,5 +60,14 @@ describe('formatAstronomical', () => {
   it('switches to light-years', () => {
     expect(formatAstronomical(9_460_730_472_580.8 * 4.2)).toBe('4.20 light-years')
     expect(formatAstronomical(9_460_730_472_580.8 * 2500)).toBe('2,500 light-years')
+  })
+})
+
+describe('formatDistance', () => {
+  it('picks km, AU or light-years', () => {
+    expect(formatDistance(384_400)).toBe('384,400 km')
+    expect(formatDistance(3_900_000)).toBe('3.9M km')
+    expect(formatDistance(149_597_870.7)).toBe('1.00 AU')
+    expect(formatDistance(9_460_730_472_580.8 * 4.2)).toBe('4.20 light-years')
   })
 })

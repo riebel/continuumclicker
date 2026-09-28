@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
+import { sectorFor } from './game/sector'
 import { gameStore } from './game/store'
 
 // jsdom has no WebGL; the 3D scene is covered by the browser checks.
@@ -117,6 +118,28 @@ describe('App', () => {
       'aria-pressed',
       'false',
     )
+  })
+
+  it('sets course on the sector map', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    act(() =>
+      gameStore.setState((s) => ({
+        game: { ...s.game, owned: { ...s.game.owned, 'driver-coil': 20 } },
+      })),
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Sector map' }))
+    const map = screen.getByRole('dialog', { name: 'Sector map' })
+    const target = sectorFor(gameStore.getState().game.sectorSeed).systems.find((s) => s.ring === 0)
+    if (!target) throw new Error('the innermost ring is never empty')
+    await user.click(within(map).getByRole('button', { name: target.name }))
+    await user.click(within(map).getByRole('button', { name: /set course/i }))
+
+    const { game } = gameStore.getState()
+    expect(game.course?.to).toBe(target.id)
+    expect(game.speedLevel).toBeGreaterThan(0) // Engines engaged automatically.
+    expect(await screen.findByText(new RegExp(`En route to ${target.name}`))).toBeInTheDocument()
   })
 
   it('resets progress after confirmation', async () => {

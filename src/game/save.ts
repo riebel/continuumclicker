@@ -3,11 +3,15 @@ import {
   COMETS,
   LASER_UPGRADES,
   type LaserUpgradeDef,
+  MODULE_SLOTS,
+  MODULES,
+  type ModuleId,
   SPEED_LEVELS,
   SPEED_OF_LIGHT_KMH,
   UPGRADES,
 } from './content'
 import { type Buff, createInitialState, type GameState } from './engine'
+import { findSystem, HOME_ID, newSectorSeed, sectorFor } from './sector'
 
 export const SAVE_KEY = 'continuum-clicker:save'
 export const SAVE_VERSION = 3
@@ -33,6 +37,23 @@ const saveSchema = z.object({
   // Added with comets.
   buffs: z.optional(z.array(z.object({ kind: z.string(), remaining: amount }))),
   cometsCaught: z.optional(count),
+  // Added with the sector map.
+  sectorSeed: z.optional(count),
+  location: z.optional(z.nullable(z.string())),
+  course: z.optional(
+    z.nullable(
+      z.object({
+        fromX: z.number(),
+        fromY: z.number(),
+        to: z.string(),
+        length: amount,
+        travelled: amount,
+      }),
+    ),
+  ),
+  visited: z.optional(z.array(z.string())),
+  modules: z.optional(z.array(z.string())),
+  equipped: z.optional(z.array(z.string())),
   clicks: count,
   lifetimeEnergy: amount,
 })
@@ -66,8 +87,38 @@ export function toSaveData(state: GameState, savedAt: number): SaveData {
     asteroidsMined: state.asteroidsMined,
     buffs: state.buffs.map(({ kind, remaining }) => ({ kind, remaining })),
     cometsCaught: state.cometsCaught,
+    sectorSeed: state.sectorSeed,
+    location: state.location,
+    course: state.course && { ...state.course },
+    visited: [...state.visited],
+    modules: [...state.modules],
+    equipped: [...state.equipped],
     clicks: state.clicks,
     lifetimeEnergy: state.lifetimeEnergy,
+  }
+}
+
+const isModule = (id: string): id is ModuleId => MODULES.some((m) => m.id === id)
+
+/** Restores where the ship is, dropping anything that does not exist in this sector. */
+function loadTravel(data: SaveData, initial: GameState) {
+  // Saves from before the map get a sector of their own.
+  const sectorSeed = data.sectorSeed ?? newSectorSeed()
+  const sector = sectorFor(sectorSeed)
+  const exists = (id: string | null | undefined): id is string => !!findSystem(sector, id ?? null)
+  const course = data.course && exists(data.course.to) ? data.course : null
+  const location = course ? null : exists(data.location) ? data.location : initial.location
+  const modules = [...new Set(data.modules ?? [])].filter(isModule)
+  const equipped = [...new Set(data.equipped ?? [])]
+    .filter((id): id is ModuleId => isModule(id) && modules.includes(id))
+    .slice(0, MODULE_SLOTS)
+  return {
+    sectorSeed,
+    location,
+    course,
+    visited: [...new Set([HOME_ID, ...(data.visited ?? []).filter(exists)])],
+    modules,
+    equipped,
   }
 }
 
@@ -109,6 +160,7 @@ export function fromSaveData(data: SaveData): LoadedGame {
       asteroidsMined: data.asteroidsMined ?? 0,
       buffs: loadBuffs(data.buffs),
       cometsCaught: data.cometsCaught ?? 0,
+      ...loadTravel(data, initial),
       clicks: data.clicks,
       lifetimeEnergy: data.lifetimeEnergy,
     },
@@ -119,7 +171,7 @@ export function migrateLegacy(raw: unknown, now: number): LoadedGame | null {
   const parsed = legacySchema.safeParse(raw)
   if (!parsed.success) return null
   const legacy = parsed.data
-  const initial = createInitialState()
+  const initial = createInitialState(newSectorSeed())
 
   const owned = { ...initial.owned }
   for (const upgrade of UPGRADES) {

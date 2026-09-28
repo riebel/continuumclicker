@@ -92,3 +92,9 @@ export function formatAstronomical(km: number): string {
   }
   return `${formatNumber(km / ASTRONOMICAL_UNIT_KM, { decimals: 2 })} AU`
 }
+
+/** A distance in whatever unit reads best: km close by, then AU, then light-years. */
+export function formatDistance(km: number): string {
+  if (km < 0.1 * ASTRONOMICAL_UNIT_KM) return `${formatNumber(km, { notation: 'short' })} km`
+  return formatAstronomical(km)
+}

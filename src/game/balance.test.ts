@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { UPGRADES } from './content'
-import { expectedCometBoost } from './engine'
+import { SECTOR_RINGS, SPEED_LEVELS, SPEED_OF_LIGHT_KMH, UPGRADES } from './content'
+import { expectedCometBoost, sustainableLevel } from './engine'
 import { ACTIVE, IDLE, longestWait, simulate } from './simulate'
 
 /**
@@ -14,6 +14,36 @@ const active = simulate(ACTIVE, 3 * 24 * HOUR)
 const idle = simulate(IDLE, 3 * 24 * HOUR)
 const unlockTimes = (sim: typeof active) =>
   UPGRADES.map((u) => sim.firstPurchaseAt[u.id] ?? Number.POSITIVE_INFINITY)
+
+/** When a trip of `km` from home first takes at most 15 minutes at a sustainable speed. */
+function reachableAt(sim: typeof active, km: number): number {
+  const sample = sim.income.find(({ production }) => {
+    const c = SPEED_LEVELS[sustainableLevel(production)]?.c ?? 0
+    return c > 0 && (km * 3600) / (c * SPEED_OF_LIGHT_KMH) <= 15 * MINUTE
+  })
+  return sample?.time ?? Number.POSITIVE_INFINITY
+}
+
+describe('sector map', () => {
+  // Each ring opens up as the engines get faster: a steady trickle of new destinations.
+  const deadlines = [10 * MINUTE, 30 * MINUTE, HOUR, 1.5 * HOUR, 3 * HOUR, 18 * HOUR]
+
+  it('brings every ring within a 15 minute trip in turn', () => {
+    let previous = 0
+    for (const [i, ring] of SECTOR_RINGS.entries()) {
+      const near = reachableAt(active, ring.minKm)
+      const far = reachableAt(active, ring.maxKm)
+      expect(near, `ring ${i}`).toBeGreaterThanOrEqual(previous)
+      expect(far, `ring ${i}`).toBeLessThanOrEqual(deadlines[i] ?? 0)
+      previous = near
+    }
+  })
+
+  it('keeps the whole sector reachable for idle players too', () => {
+    const last = SECTOR_RINGS.at(-1)?.maxKm ?? 0
+    expect(reachableAt(idle, last)).toBeLessThan(40 * HOUR)
+  })
+})
 
 describe('content curve', () => {
   it('makes every tier more expensive and slower to pay back than the one before', () => {

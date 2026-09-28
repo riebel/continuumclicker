@@ -4,6 +4,7 @@ import { cn } from './ui/cn'
 import { EnergyReadout, FlightReadout } from './ui/Hud'
 import { Menu } from './ui/Menu'
 import { Notices } from './ui/Notices'
+import { SectorMapButton } from './ui/SectorMap'
 import { ShipStage, supportsWebGL } from './ui/ShipStage'
 import { SpeedPanel } from './ui/SpeedPanel'
 import { type SceneState, Stage } from './ui/Stage'
@@ -41,7 +42,8 @@ export function App() {
         </div>
 
         <section className="relative flex min-h-0 flex-1 flex-col items-center justify-between gap-2 max-lg:order-first">
-          <div className="absolute top-0 right-0">
+          <div className="absolute top-0 right-0 z-10 flex flex-col gap-2 lg:flex-row">
+            <SectorMapButton />
             <Menu />
           </div>
           <EnergyReadout />

@@ -1,13 +1,22 @@
-import { type BuffKind, drain, production, speedKmh, speedLevelOf } from '../game/engine'
+import {
+  type BuffKind,
+  drain,
+  droneIncome,
+  production,
+  speedKmh,
+  speedLevelOf,
+} from '../game/engine'
 import { formatAstronomical, formatDuration, formatNumber } from '../game/format'
+import { findSystem, sectorFor } from '../game/sector'
 import { useGame } from '../game/store'
 import { cn } from './cn'
 
 export function EnergyReadout() {
   const energy = useGame((s) => s.game.energy)
   const produced = useGame((s) => production(s.game))
+  const drones = useGame((s) => droneIncome(s.game))
   const drained = useGame((s) => drain(s.game))
-  const net = produced - drained
+  const net = produced + drones - drained
 
   return (
     <header className="glow px-12 text-center lg:px-0">
@@ -19,6 +28,13 @@ export function EnergyReadout() {
       <p className="mt-1 text-base tabular-nums sm:text-lg">
         <span className="text-ok">+{formatNumber(produced, { decimals: 1 })}/s</span>
         <span className="text-white/60"> reactors</span>
+        {drones > 0 && (
+          <>
+            <span className="text-white/40"> · </span>
+            <span className="text-ok">+{formatNumber(drones, { decimals: 1 })}/s</span>
+            <span className="text-white/60"> drones</span>
+          </>
+        )}
         {drained > 0 && (
           <>
             <span className="text-white/40"> · </span>
@@ -88,13 +104,32 @@ function ActiveBuffs() {
   )
 }
 
+/** Where the ship is docked, or where it is heading and when it gets there. */
+function Whereabouts() {
+  const text = useGame(({ game }) => {
+    const sector = sectorFor(game.sectorSeed)
+    if (!game.course) {
+      const docked = findSystem(sector, game.location)
+      const bonus = docked?.kind === 'belt' ? ' · mining bonus' : ''
+      return `Docked at ${docked?.name ?? 'nowhere'}${bonus}`
+    }
+    const target = findSystem(sector, game.course.to)
+    const kmh = speedKmh(game)
+    const left = game.course.length - game.course.travelled
+    const eta =
+      kmh > 0 ? ` · ${formatDuration(Math.max(1, (left * 3600) / kmh))}` : ' · engines stopped'
+    return `En route to ${target?.name ?? 'unknown'}${eta}`
+  })
+  return <p className="col-span-2 text-sm text-white/70">{text}</p>
+}
+
 export function FlightReadout() {
   const kmh = useGame((s) => speedKmh(s.game))
   const c = useGame((s) => speedLevelOf(s.game).c)
   const distance = useGame((s) => s.game.distance)
 
   return (
-    <footer className="glow grid grid-cols-2 gap-4 text-center tabular-nums">
+    <footer className="glow grid grid-cols-2 gap-x-4 gap-y-1 text-center tabular-nums">
       <div>
         <p className="text-xs font-semibold tracking-widest text-white/50 uppercase">Speed</p>
         <p className="text-xl font-bold sm:text-2xl">{formatNumber(kmh)} km/h</p>
@@ -107,6 +142,7 @@ export function FlightReadout() {
         <p className="text-xl font-bold sm:text-2xl">{formatNumber(distance)} km</p>
         <p className="text-sm text-white/60">{formatAstronomical(distance)}</p>
       </div>
+      <Whereabouts />
     </footer>
   )
 }

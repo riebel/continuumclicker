@@ -192,3 +192,108 @@ export const LASER_UPGRADES = [
 ] as const satisfies readonly LaserUpgradeDef[]
 
 export type LaserUpgradeId = (typeof LASER_UPGRADES)[number]['id']
+
+/**
+ * Rare ship modules found out in the sector. Only `MODULE_SLOTS` can be equipped at once, so
+ * they are choices: fit the ship for mining, for travel or for idling.
+ */
+export const MODULES = [
+  {
+    id: 'chain-laser',
+    name: 'Chain laser',
+    effect: 'A broken asteroid cracks the next one: it starts 2 hits weaker.',
+  },
+  {
+    id: 'crystal-scanner',
+    name: 'Crystal scanner',
+    effect: 'Crystal asteroids are 2.5× as common and crystal veins open twice as often.',
+  },
+  {
+    id: 'mining-drones',
+    name: 'Mining drones',
+    effect: 'Drones mine on their own, 1 shot per second, even while you are away.',
+  },
+  {
+    id: 'comet-lure',
+    name: 'Comet lure',
+    effect: 'Comets come 40% more often and stay 30% longer.',
+  },
+  {
+    id: 'salvage-tractor',
+    name: 'Salvage tractor',
+    effect: 'Double energy from windfalls, first visits and salvage.',
+  },
+  {
+    id: 'warp-field-tuner',
+    name: 'Warp field tuner',
+    effect: 'Every speed level drains 25% less energy.',
+  },
+] as const
+
+export type ModuleId = (typeof MODULES)[number]['id']
+
+export const MODULE_SLOTS = 3
+
+export const MODULE_EFFECTS = {
+  chainLaserDamage: 2,
+  crystalScannerChance: 2.5,
+  crystalScannerVeins: 2,
+  droneShotsPerSecond: 1,
+  cometLureFrequency: 1.4,
+  cometLureLifetime: 1.3,
+  salvageMultiplier: 2,
+  warpTunerDrain: 0.75,
+} as const
+
+export type SystemKind = 'home' | 'belt' | 'world' | 'derelict' | 'anomaly'
+
+/**
+ * The sector is generated from a seed stored in the save, in rings around the home station.
+ * Each ring is tuned to be a trip of 5–15 minutes at the speed a player typically reaches when
+ * the ring becomes relevant, so faster engines always open up the next destinations.
+ * `balance.test.ts` checks that against the simulated progression.
+ */
+export const SECTOR_RINGS = [
+  // Within reach of impulse engines in the first minutes.
+  { minKm: 5e5, maxKm: 4e6, kinds: ['belt', 'derelict'], price: 0 },
+  // Around one AU: full impulse or warp 1.
+  { minKm: 5e7, maxKm: 2.2e8, kinds: ['world', 'belt', 'anomaly'], price: 1e6 },
+  // The outer planets: warp 2–3.
+  { minKm: 5e8, maxKm: 2.2e9, kinds: ['world', 'derelict', 'belt'], price: 6e6 },
+  // The Kuiper belt: warp 4–6.
+  { minKm: 6e9, maxKm: 3e10, kinds: ['world', 'anomaly', 'derelict'], price: 1.5e8 },
+  // The Oort cloud: warp 9.9 and above.
+  { minKm: 4.7e11, maxKm: 2e12, kinds: ['world', 'belt', 'anomaly'], price: 8e9 },
+  // Neighbouring stars: only maximum warp gets there in reasonable time.
+  { minKm: 2.8e13, maxKm: 5.3e13, kinds: ['derelict', 'world'], price: 2e11 },
+] as const satisfies readonly {
+  minKm: number
+  maxKm: number
+  kinds: readonly SystemKind[]
+  price: number
+}[]
+
+/** Where each module can turn up at the earliest, by ring index. */
+export const MODULE_MIN_RING: Record<ModuleId, number> = {
+  'chain-laser': 1,
+  'crystal-scanner': 1,
+  'mining-drones': 2,
+  'comet-lure': 2,
+  'warp-field-tuner': 3,
+  'salvage-tractor': 3,
+}
+
+export const VISITS = {
+  /** First visit to any system: this many seconds of production, at least `minimum`. */
+  firstVisitSeconds: 120,
+  firstVisitMinimum: 50,
+  /** Salvaging a derelict pays this many seconds of production on top. */
+  salvageSeconds: 600,
+  /** An anomaly's energy cache pays this many seconds of production. */
+  anomalySeconds: 900,
+  /** Docked at an asteroid belt: hits are worth more and crystals are more common. */
+  beltHitMultiplier: 1.5,
+  beltCrystalChance: 2,
+  /** Travel time the scanners can see ahead at the fastest sustainable speed. */
+  scanSeconds: 30 * 60,
+} as const

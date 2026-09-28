@@ -97,14 +97,14 @@ export function simulate(style: Playstyle, maxSeconds: number): Simulation {
 
   while (time < maxSeconds) {
     const produced = production(state)
-    if (produced >= MAX_DRAIN) {
-      return { purchases, firstPurchaseAt, maxWarpAt: time, income, state }
-    }
     const shots = produced < style.mineUntilProduction ? style.shotsPerSecond : 0
     const incomeOf = (s: GameState) => production(s) + shots * expectedHitEnergy(s)
     const current = incomeOf(state)
     const mining = current - produced
     income.push({ time, production: produced, total: current })
+    if (produced >= MAX_DRAIN) {
+      return { purchases, firstPurchaseAt, maxWarpAt: time, income, state }
+    }
 
     let best: { item: Item; wait: number; score: number } | undefined
     for (const item of ITEMS) {

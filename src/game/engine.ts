@@ -8,6 +8,9 @@ import {
   type LaserUpgradeId,
   MAX_DRAIN,
   MILESTONE_MULTIPLIER,
+  MODULE_EFFECTS,
+  MODULE_SLOTS,
+  type ModuleId,
   PRODUCTION_MILESTONES,
   SPEED_LEVELS,
   SPEED_OF_LIGHT_KMH,
@@ -15,8 +18,10 @@ import {
   UPGRADES,
   type UpgradeDef,
   type UpgradeId,
+  VISITS,
   VISUAL_TIER_THRESHOLDS,
 } from './content'
+import { distanceBetween, findSystem, HOME_ID, type StarSystem, sectorFor } from './sector'
 
 export type AsteroidKind = 'rock' | 'crystal'
 
@@ -52,13 +57,33 @@ export interface GameState {
   readonly asteroidsMined: number
   readonly buffs: readonly Buff[]
   readonly cometsCaught: number
+  /** Seed of this game's sector map. */
+  readonly sectorSeed: number
+  /** The system the ship is docked at, null while travelling. */
+  readonly location: string | null
+  readonly course: Course | null
+  /** Systems visited at least once; their first-visit rewards are claimed. */
+  readonly visited: readonly string[]
+  /** Rare modules found or bought, and the ones fitted to the ship. */
+  readonly modules: readonly ModuleId[]
+  readonly equipped: readonly ModuleId[]
   /** Laser shots fired. */
   readonly clicks: number
   /** All energy ever gained, from clicks and production. */
   readonly lifetimeEnergy: number
 }
 
-export function createInitialState(): GameState {
+/** A trip to a system. Distances in km. */
+export interface Course {
+  /** Where the trip started. */
+  readonly fromX: number
+  readonly fromY: number
+  readonly to: string
+  readonly length: number
+  readonly travelled: number
+}
+
+export function createInitialState(sectorSeed = 1): GameState {
   return {
     energy: 0,
     distance: 0,
@@ -72,9 +97,24 @@ export function createInitialState(): GameState {
     asteroidsMined: 0,
     buffs: [],
     cometsCaught: 0,
+    sectorSeed,
+    location: HOME_ID,
+    course: null,
+    visited: [HOME_ID],
+    modules: [],
+    equipped: [],
     clicks: 0,
     lifetimeEnergy: 0,
   }
+}
+
+export function hasModule(state: GameState, id: ModuleId): boolean {
+  return state.equipped.includes(id)
+}
+
+/** The system the ship is docked at. */
+export function dockedAt(state: GameState): StarSystem | undefined {
+  return findSystem(sectorFor(state.sectorSeed), state.location)
 }
 
 export function upgradeCost(upgrade: Pick<UpgradeDef, 'baseCost'>, owned: number): number {
@@ -126,19 +166,48 @@ export function production(state: GameState): number {
   return base * buffMultiplier(state, 'overdrive')
 }
 
+/** Energy per second mined by drones, if they are fitted. Also runs while the player is away. */
+export function droneIncome(state: GameState): number {
+  if (!hasModule(state, 'mining-drones')) return 0
+  return MODULE_EFFECTS.droneShotsPerSecond * expectedHitEnergy(state)
+}
+
+/** Energy gained per second without the player: reactors plus drones. */
+export function income(state: GameState): number {
+  return production(state) + droneIncome(state)
+}
+
+/** Drain multiplier from the fitted modules. */
+function drainFactor(state: GameState): number {
+  return hasModule(state, 'warp-field-tuner') ? MODULE_EFFECTS.warpTunerDrain : 1
+}
+
+/** Energy per second a speed level consumes for this ship. */
+export function levelDrain(state: GameState, index: number): number {
+  return (SPEED_LEVELS[index]?.drain ?? 0) * drainFactor(state)
+}
+
 /** Energy consumed per second by the engaged speed level. */
 export function drain(state: GameState): number {
-  return speedLevelOf(state).drain
+  return levelDrain(state, state.speedLevel)
 }
 
 /** Net energy change per second. Negative while flying faster than the reactors can sustain. */
 export function netRate(state: GameState): number {
-  return production(state) - drain(state)
+  return income(state) - drain(state)
 }
 
-/** Fastest speed level whose drain is fully covered by production. Always exists (full stop). */
-export function sustainableLevel(prod: number): number {
-  return SPEED_LEVELS.findLastIndex((level) => level.drain <= prod)
+/**
+ * Fastest speed level whose drain is fully covered by `perSecond` of income. Always exists
+ * (full stop). `drainFactor` accounts for a warp field tuner.
+ */
+export function sustainableLevel(perSecond: number, factor = 1): number {
+  return SPEED_LEVELS.findLastIndex((level) => level.drain * factor <= perSecond)
+}
+
+/** Fastest speed level this ship can hold indefinitely. */
+export function fastestSustainable(state: GameState): number {
+  return sustainableLevel(income(state), drainFactor(state))
 }
 
 export type SpeedLevelStatus = 'engaged' | 'sustainable' | 'burst' | 'locked'
@@ -150,10 +219,10 @@ export type SpeedLevelStatus = 'engaged' | 'sustainable' | 'burst' | 'locked'
  */
 export function speedLevelStatus(state: GameState, index: number): SpeedLevelStatus {
   if (index === state.speedLevel) return 'engaged'
-  const level = SPEED_LEVELS[index]
-  if (!level) return 'locked'
-  if (level.drain <= production(state)) return 'sustainable'
-  if (level.drain <= state.energy) return 'burst'
+  if (!SPEED_LEVELS[index]) return 'locked'
+  const cost = levelDrain(state, index)
+  if (cost <= income(state)) return 'sustainable'
+  if (cost <= state.energy) return 'burst'
   return 'locked'
 }
 
@@ -219,7 +288,15 @@ export function hitEnergy(state: GameState): number {
   const amplifier = state.lasers['laser-amplifier']
   const share = LASER.productionShare + 0.002 * amplifier
   const hit = LASER.baseEnergy * (1 + amplifier) + share * production(state)
-  return hit * buffMultiplier(state, 'laser-frenzy')
+  const belt = dockedAt(state)?.kind === 'belt' ? VISITS.beltHitMultiplier : 1
+  return hit * belt * buffMultiplier(state, 'laser-frenzy')
+}
+
+/** Chance that the next asteroid is a crystal one: higher in a belt or with a scanner. */
+export function crystalChance(state: GameState): number {
+  const scanner = hasModule(state, 'crystal-scanner') ? MODULE_EFFECTS.crystalScannerChance : 1
+  const belt = dockedAt(state)?.kind === 'belt' ? VISITS.beltCrystalChance : 1
+  return Math.min(0.5, ASTEROIDS.crystal.chance * scanner * belt)
 }
 
 export function critChance(state: GameState): number {
@@ -242,17 +319,21 @@ function kindMultiplier(kind: AsteroidKind): number {
 /** Average energy per shot over many asteroids: crits, break bonuses and crystals included. */
 export function expectedHitEnergy(state: GameState): number {
   const { rock, crystal } = ASTEROIDS
-  const rockHits = (1 - crystal.chance) * ((rock.minHp + rock.maxHp) / 2)
-  const crystalHits = crystal.chance * crystal.hp
+  const chance = crystalChance(state)
+  const rockHits = (1 - chance) * ((rock.minHp + rock.maxHp) / 2)
+  const crystalHits = chance * crystal.hp
   const crystalShare = crystalHits / (rockHits + crystalHits)
   const kinds = 1 + crystalShare * (crystal.energyMultiplier - 1)
   const crits = 1 + critChance(state) * (critMultiplier(state) - 1)
   return hitEnergy(state) * kinds * (crits + breakBonus(state))
 }
 
-export function createAsteroid(random: () => number = Math.random): Asteroid {
+export function createAsteroid(
+  random: () => number = Math.random,
+  chance: number = ASTEROIDS.crystal.chance,
+): Asteroid {
   const { rock, crystal } = ASTEROIDS
-  if (random() < crystal.chance) return { kind: 'crystal', hp: crystal.hp, maxHp: crystal.hp }
+  if (random() < chance) return { kind: 'crystal', hp: crystal.hp, maxHp: crystal.hp }
   const hp = rock.minHp + Math.floor(random() * (rock.maxHp - rock.minHp + 1))
   return { kind: 'rock', hp, maxHp: hp }
 }
@@ -287,6 +368,14 @@ export function fire(
   const broken = target.hp <= 0
   const bonus = broken ? hit * target.maxHp * breakBonus(state) : 0
   const earned = gained + bonus
+  let next = target
+  if (broken) {
+    next = createAsteroid(random, crystalChance(state))
+    // A chain laser cracks the next asteroid as the last one breaks.
+    if (hasModule(state, 'chain-laser')) {
+      next = { ...next, hp: Math.max(1, next.hp - MODULE_EFFECTS.chainLaserDamage) }
+    }
+  }
 
   return {
     gained,
@@ -298,32 +387,59 @@ export function fire(
       energy: state.energy + earned,
       lifetimeEnergy: state.lifetimeEnergy + earned,
       clicks: state.clicks + 1,
-      asteroid: broken ? createAsteroid(random) : target,
+      asteroid: next,
       asteroidsMined: state.asteroidsMined + (broken ? 1 : 0),
     },
   }
+}
+
+/** What happened when the ship arrived somewhere. */
+export interface Arrival {
+  readonly system: string
+  /** First visit: its rewards below were just claimed. */
+  readonly firstVisit: boolean
+  readonly energy: number
+  /** Module salvaged or found. */
+  readonly module: ModuleId | null
+  /** An anomaly that turned out to overcharge the reactors. */
+  readonly overdrive: boolean
 }
 
 export interface AdvanceResult {
   readonly state: GameState
   /** True when the energy ran dry and the ship dropped to a sustainable speed. */
   readonly downshifted: boolean
+  readonly arrivals: readonly Arrival[]
+}
+
+/** Seconds until the ship arrives at its destination at the engaged speed. */
+function secondsToArrival(state: GameState): number {
+  const kmh = speedKmh(state)
+  if (!state.course || kmh <= 0) return Number.POSITIVE_INFINITY
+  return (Math.max(0, state.course.length - state.course.travelled) * 3600) / kmh
 }
 
 /**
  * Advances the simulation by `seconds`. Exact regardless of step size, so the same function
  * handles a 16 ms animation frame and a week of offline progress: if the reserves run dry
  * part-way through, the distance up to that moment is kept and the ship drops to the fastest
- * speed its reactors can sustain for the remaining time.
+ * speed its reactors can sustain for the remaining time. A ship on course drops out of warp
+ * exactly on arrival.
  */
 export function advance(state: GameState, seconds: number): AdvanceResult {
   let remaining = Math.max(0, Number.isFinite(seconds) ? seconds : 0)
   let current = state
   let downshifted = false
+  const arrivals: Arrival[] = []
 
-  // Production changes whenever a buff runs out, so cruise from one expiry to the next.
+  // Income changes whenever a buff runs out and travel stops on arrival, so cruise from one of
+  // these moments to the next.
   do {
-    const step = Math.min(remaining, ...current.buffs.map((b) => b.remaining))
+    const step = Math.min(
+      remaining,
+      secondsToArrival(current),
+      ...current.buffs.map((b) => b.remaining),
+    )
     const result = cruise(current, step)
     downshifted ||= result.downshifted
     remaining -= step
@@ -333,22 +449,29 @@ export function advance(state: GameState, seconds: number): AdvanceResult {
         .map((b) => ({ ...b, remaining: b.remaining - step }))
         .filter((b) => b.remaining > 1e-9),
     }
+    const course = current.course
+    if (course && course.travelled >= course.length * (1 - 1e-12) - 1e-6) {
+      const arrived = arrive(current, course.to)
+      current = arrived.state
+      arrivals.push(arrived.arrival)
+    }
   } while (remaining > 0)
 
-  return { state: current, downshifted }
+  return { state: current, downshifted, arrivals }
 }
 
-/** Advances by `seconds` at constant production. */
-function cruise(state: GameState, seconds: number): AdvanceResult {
+/** Advances by `seconds` at constant income. */
+function cruise(state: GameState, seconds: number): Omit<AdvanceResult, 'arrivals'> {
   let remaining = seconds
   let { energy, distance, speedLevel, lifetimeEnergy } = state
   let downshifted = false
-  const prod = production(state)
-  lifetimeEnergy += prod * remaining
+  const perSecond = income(state)
+  const factor = drainFactor(state)
+  lifetimeEnergy += perSecond * remaining
 
   while (remaining > 0) {
     const level = SPEED_LEVELS[speedLevel] ?? (SPEED_LEVELS[0] as SpeedLevelDef)
-    const net = prod - level.drain
+    const net = perSecond - level.drain * factor
     const speed = level.c * SPEED_OF_LIGHT_KMH
     const untilEmpty = net < 0 ? energy / -net : Number.POSITIVE_INFINITY
 
@@ -361,11 +484,131 @@ function cruise(state: GameState, seconds: number): AdvanceResult {
     energy = 0
     distance += (speed * untilEmpty) / 3600
     remaining -= untilEmpty
-    speedLevel = sustainableLevel(prod)
+    speedLevel = sustainableLevel(perSecond, factor)
     downshifted = true
   }
 
-  return { state: { ...state, energy, distance, speedLevel, lifetimeEnergy }, downshifted }
+  const course = state.course && {
+    ...state.course,
+    travelled: state.course.travelled + (distance - state.distance),
+  }
+  return { state: { ...state, energy, distance, speedLevel, lifetimeEnergy, course }, downshifted }
+}
+
+/** Where the ship is, in km from home. */
+export function position(state: GameState): { x: number; y: number } {
+  const sector = sectorFor(state.sectorSeed)
+  const { course } = state
+  if (!course) {
+    const docked = findSystem(sector, state.location)
+    return { x: docked?.x ?? 0, y: docked?.y ?? 0 }
+  }
+  const target = findSystem(sector, course.to) ?? { x: 0, y: 0 }
+  const t = course.length > 0 ? Math.min(1, course.travelled / course.length) : 1
+  return {
+    x: course.fromX + (target.x - course.fromX) * t,
+    y: course.fromY + (target.y - course.fromY) * t,
+  }
+}
+
+/** Plots a course from wherever the ship is. Changing course mid-flight is fine. */
+export function setCourse(state: GameState, to: string): GameState {
+  const target = findSystem(sectorFor(state.sectorSeed), to)
+  if (!target || (state.location === to && !state.course)) return state
+  const from = position(state)
+  return {
+    ...state,
+    location: null,
+    course: {
+      fromX: from.x,
+      fromY: from.y,
+      to,
+      length: distanceBetween(from, target),
+      travelled: 0,
+    },
+  }
+}
+
+/** Seconds a trip to `system` takes at a speed level, Infinity if it does not move. */
+export function travelSeconds(state: GameState, system: StarSystem, level: number): number {
+  const kmh = (SPEED_LEVELS[level]?.c ?? 0) * SPEED_OF_LIGHT_KMH
+  return kmh > 0
+    ? (distanceBetween(position(state), system) * 3600) / kmh
+    : Number.POSITIVE_INFINITY
+}
+
+/**
+ * Whether the scanners can see what a system is: visited systems, and those the ship could
+ * reach within `VISITS.scanSeconds` at its fastest sustainable speed. The innermost ring is
+ * always in view.
+ */
+export function isScanned(state: GameState, system: StarSystem): boolean {
+  if (system.ring <= 0 || state.visited.includes(system.id)) return true
+  return travelSeconds(state, system, fastestSustainable(state)) <= VISITS.scanSeconds
+}
+
+function salvageMultiplier(state: GameState): number {
+  return hasModule(state, 'salvage-tractor') ? MODULE_EFFECTS.salvageMultiplier : 1
+}
+
+/** Docks at a system; the first visit pays out its rewards. */
+function arrive(state: GameState, id: string): { state: GameState; arrival: Arrival } {
+  const docked: GameState = { ...state, location: id, course: null, speedLevel: 0 }
+  const system = findSystem(sectorFor(state.sectorSeed), id)
+  if (!system || state.visited.includes(id)) {
+    return {
+      state: docked,
+      arrival: { system: id, firstVisit: false, energy: 0, module: null, overdrive: false },
+    }
+  }
+
+  const prod = production(state)
+  const salvage = salvageMultiplier(state)
+  let energy = Math.max(VISITS.firstVisitMinimum, prod * VISITS.firstVisitSeconds)
+  if (system.kind === 'derelict') energy += prod * VISITS.salvageSeconds
+  if (system.anomaly === 'cache') energy += prod * VISITS.anomalySeconds
+  energy *= salvage
+
+  const module = system.find && !state.modules.includes(system.find) ? system.find : null
+  const overdrive = system.anomaly === 'overdrive'
+  const { multiplier, duration } = COMETS.rewards.overdrive
+  const buffs = overdrive
+    ? [
+        ...state.buffs.filter((b) => b.kind !== 'overdrive'),
+        { kind: 'overdrive' as const, multiplier, duration: duration * 2, remaining: duration * 2 },
+      ]
+    : state.buffs
+
+  return {
+    arrival: { system: id, firstVisit: true, energy, module, overdrive },
+    state: {
+      ...docked,
+      energy: state.energy + energy,
+      lifetimeEnergy: state.lifetimeEnergy + energy,
+      visited: [...state.visited, id],
+      modules: module ? [...state.modules, module] : state.modules,
+      buffs,
+    },
+  }
+}
+
+/** Buys a module offered at the system the ship is docked at. */
+export function buyModule(state: GameState, id: ModuleId): GameState {
+  const offer = dockedAt(state)?.offers.find((o) => o.module === id)
+  if (!offer || state.modules.includes(id) || offer.price > state.energy) return state
+  return { ...state, energy: state.energy - offer.price, modules: [...state.modules, id] }
+}
+
+/** Fits an owned module into a free slot. */
+export function equip(state: GameState, id: ModuleId): GameState {
+  if (!state.modules.includes(id) || hasModule(state, id)) return state
+  if (state.equipped.length >= MODULE_SLOTS) return state
+  return { ...state, equipped: [...state.equipped, id] }
+}
+
+export function unequip(state: GameState, id: ModuleId): GameState {
+  if (!hasModule(state, id)) return state
+  return { ...state, equipped: state.equipped.filter((m) => m !== id) }
 }
 
 export type CometReward =
@@ -399,8 +642,9 @@ export function catchComet(state: GameState, random: () => number = Math.random)
   if (kind === 'windfall') {
     const { bankShare, productionSeconds, hits } = COMETS.rewards.windfall
     const energy =
-      Math.min(state.energy * bankShare, production(state) * productionSeconds) +
-      hits * hitEnergy(state)
+      (Math.min(state.energy * bankShare, production(state) * productionSeconds) +
+        hits * hitEnergy(state)) *
+      salvageMultiplier(state)
     return {
       reward: { kind, energy },
       state: {

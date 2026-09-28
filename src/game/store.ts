@@ -4,26 +4,41 @@ import {
   COMETS,
   CRYSTAL_VEIN,
   type LaserUpgradeId,
+  MODULE_EFFECTS,
+  MODULES,
+  type ModuleId,
   SPEED_LEVELS,
   UPGRADES,
   type UpgradeId,
 } from './content'
 import {
+  type Arrival,
   advance,
   buyLaser,
+  buyModule,
   buyUpgrade,
   type CometReward,
   catchComet,
   createInitialState,
   engage,
+  equip,
+  fastestSustainable,
   fire,
   type GameState,
+  hasModule,
   milestoneMultiplier,
   type Shot,
+  setCourse,
+  unequip,
   visualTier,
 } from './engine'
 import { formatDuration, formatNumber } from './format'
 import { browserStorage, clearSave, loadGame, saveGame } from './save'
+import { findSystem, newSectorSeed, sectorFor } from './sector'
+
+const veinChance = (game: GameState) =>
+  CRYSTAL_VEIN.chance *
+  (hasModule(game, 'crystal-scanner') ? MODULE_EFFECTS.crystalScannerVeins : 1)
 
 /** Gaps longer than this (tab in background, app closed) are reported as offline progress. */
 export const OFFLINE_REPORT_AFTER_MS = 60_000
@@ -71,6 +86,11 @@ export interface GameStore {
     fire(options?: { vein?: boolean }): Shot
     /** Catches the current comet. Returns its reward, or null if there is none to catch. */
     catchComet(): CometReward | null
+    /** Plots a course to a system, engaging the engines if the ship is standing still. */
+    setCourse(system: string): void
+    buyModule(id: ModuleId): void
+    equip(id: ModuleId): void
+    unequip(id: ModuleId): void
     buy(id: UpgradeId): void
     buyLaser(id: LaserUpgradeId): void
     engage(speedLevel: number): void
@@ -100,23 +120,46 @@ export function createGameStore(
       set((s) => ({ notices: [...s.notices.slice(-3), { ...notice, id }] }))
     }
 
+    const lured = () => hasModule(get().game, 'comet-lure')
+    /** When the next comet comes, counted from `time`. */
+    const nextComet = (time: number) =>
+      time + between(COMETS.interval) / (lured() ? MODULE_EFFECTS.cometLureFrequency : 1)
+
     /** Spawns, retires and schedules comets and veins. */
     const updateEvents = (time: number, returning: boolean) => {
       const { comet, nextCometAt, vein } = get()
       if (vein && time >= vein.closesAt) set({ vein: null })
       if (comet && time >= comet.leavesAt) {
-        set({ comet: null, nextCometAt: time + between(COMETS.interval) })
+        set({ comet: null, nextCometAt: nextComet(time) })
       } else if (returning) {
         // No comet waits for a returning player: start the countdown afresh.
         set({ comet: null, nextCometAt: time + between(COMETS.firstAfter) })
       } else if (!comet && time >= nextCometAt) {
         const id = ++eventId
-        set({ comet: { id, appearedAt: time, leavesAt: time + COMETS.lifetime * 1000 } })
+        const lifetime = COMETS.lifetime * (lured() ? MODULE_EFFECTS.cometLureLifetime : 1)
+        set({ comet: { id, appearedAt: time, leavesAt: time + lifetime * 1000 } })
       }
     }
 
+    const announce = (arrival: Arrival) => {
+      const { game } = get()
+      const system = findSystem(sectorFor(game.sectorSeed), arrival.system)
+      if (!system) return
+      const found = arrival.module && MODULES.find((m) => m.id === arrival.module)
+      const details = [
+        arrival.energy > 0 && `+${formatNumber(arrival.energy)} energy`,
+        found && `Found a ${found.name} module!`,
+        arrival.overdrive && 'The anomaly overcharged the reactors.',
+      ].filter(Boolean)
+      notify({
+        kind: arrival.firstVisit ? 'success' : 'info',
+        title: `Arrived at ${system.name}`,
+        ...(details.length > 0 && { message: details.join(' ') }),
+      })
+    }
+
     return {
-      game: loaded?.state ?? createInitialState(),
+      game: loaded?.state ?? createInitialState(newSectorSeed(random)),
       lastTick: loaded ? Math.min(loaded.savedAt, now) : now,
       notices: [],
       lastShot: null,
@@ -136,6 +179,7 @@ export function createGameStore(
           const result = advance(game, elapsedMs / 1000)
           set({ game: result.state, lastTick: time })
           updateEvents(time, elapsedMs >= OFFLINE_REPORT_AFTER_MS)
+          for (const arrival of result.arrivals) announce(arrival)
 
           if (elapsedMs >= OFFLINE_REPORT_AFTER_MS) {
             const earned = result.state.lifetimeEnergy - game.lifetimeEnergy
@@ -163,7 +207,7 @@ export function createGameStore(
           set({ game: state, lastShot: { ...shot, id: ++shotId } })
           if (struck) {
             set({ vein: null })
-          } else if (!get().vein && random() < CRYSTAL_VEIN.chance) {
+          } else if (!get().vein && random() < veinChance(get().game)) {
             const id = ++eventId
             set({
               vein: {
@@ -180,12 +224,31 @@ export function createGameStore(
           get().actions.tick()
           if (!get().comet) return null
           const { state, reward } = catchComet(get().game, random)
-          set({
-            game: state,
-            comet: null,
-            nextCometAt: Date.now() + between(COMETS.interval),
-          })
+          set({ game: state, comet: null, nextCometAt: nextComet(Date.now()) })
           return reward
+        },
+
+        setCourse(to) {
+          get().actions.tick()
+          const before = get().game
+          let game = setCourse(before, to)
+          if (game === before) return
+          // Leaving from a standstill: engage the fastest speed the reactors can hold.
+          if (game.speedLevel === 0) game = engage(game, fastestSustainable(game))
+          set({ game })
+        },
+
+        buyModule(id) {
+          get().actions.tick()
+          set((s) => ({ game: buyModule(s.game, id) }))
+        },
+
+        equip(id) {
+          set((s) => ({ game: equip(s.game, id) }))
+        },
+
+        unequip(id) {
+          set((s) => ({ game: unequip(s.game, id) }))
         },
 
         buy(id) {
@@ -229,7 +292,7 @@ export function createGameStore(
           clearSave(storage)
           const time = Date.now()
           set({
-            game: createInitialState(),
+            game: createInitialState(newSectorSeed(random)),
             lastTick: time,
             notices: [],
             lastShot: null,

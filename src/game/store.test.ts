@@ -72,7 +72,9 @@ describe('game store', () => {
 
     store.getState().actions.reset()
     expect(storage.data.has(SAVE_KEY)).toBe(false)
-    expect(store.getState().game).toEqual(createInitialState())
+    // A fresh start also gets a fresh sector.
+    const { game } = store.getState()
+    expect(game).toEqual(createInitialState(game.sectorSeed))
   })
 })
 
