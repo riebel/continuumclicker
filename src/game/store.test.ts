@@ -12,7 +12,7 @@ describe('game store', () => {
       game: { ...s.game, owned: { ...s.game.owned, 'driver-coil': 1 } },
     }))
     actions.tick(2_500)
-    expect(store.getState().game.energy).toBeCloseTo(10)
+    expect(store.getState().game.energy).toBeCloseTo(7.5) // 3 eps
     expect(store.getState().lastTick).toBe(2_500)
   })
 
@@ -27,13 +27,13 @@ describe('game store', () => {
     const storage = memoryStorage()
     const state = {
       ...createInitialState(),
-      owned: { ...createInitialState().owned, 'avidyne-engine': 10 },
+      owned: { ...createInitialState().owned, 'avidyne-engine': 5 }, // 0.5 eps
     }
     saveGame(storage, state, 0)
 
     const store = createGameStore(storage, 3_600_000)
     store.getState().actions.tick(3_600_000)
-    expect(store.getState().game.energy).toBeCloseTo(3600)
+    expect(store.getState().game.energy).toBeCloseTo(1800)
     expect(store.getState().notices[0]?.title).toMatch(/away for 1 h/)
   })
 
@@ -47,6 +47,18 @@ describe('game store', () => {
     const count = store.getState().notices.length
     store.getState().actions.buy('avidyne-engine')
     expect(store.getState().notices).toHaveLength(count)
+  })
+
+  it('announces doubled output at production milestones', () => {
+    const store = createGameStore(memoryStorage(), 0)
+    store.setState((s) => ({
+      game: { ...s.game, energy: 1e6, owned: { ...s.game.owned, 'avidyne-engine': 9 } },
+    }))
+    store.getState().actions.buy('avidyne-engine')
+    expect(store.getState().notices.at(-1)).toMatchObject({
+      title: 'Ship upgraded: Avidyne engine module 3/5 installed',
+      message: 'Avidyne engine output doubled.',
+    })
   })
 
   it('saves on demand and can be reset', () => {

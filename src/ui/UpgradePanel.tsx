@@ -1,5 +1,18 @@
-import { UPGRADES, type UpgradeDef, type UpgradeId, VISUAL_TIER_THRESHOLDS } from '../game/content'
-import { nextVisualTierAt, upgradeCost, visualTier } from '../game/engine'
+import {
+  MILESTONE_MULTIPLIER,
+  UPGRADES,
+  type UpgradeDef,
+  type UpgradeId,
+  VISUAL_TIER_THRESHOLDS,
+} from '../game/content'
+import {
+  milestoneMultiplier,
+  nextMilestoneAt,
+  nextVisualTierAt,
+  upgradeCost,
+  upgradeProduction,
+  visualTier,
+} from '../game/engine'
 import { formatNumber } from '../game/format'
 import { useActions, useGame } from '../game/store'
 import { cn } from './cn'
@@ -30,6 +43,8 @@ function UpgradeRow({ upgrade }: { upgrade: UpgradeDef & { id: UpgradeId } }) {
   const { buy } = useActions()
   const owned = useGame((s) => s.game.owned[upgrade.id])
   const cost = upgradeCost(upgrade, owned)
+  const multiplier = milestoneMultiplier(owned)
+  const nextMilestone = nextMilestoneAt(owned)
   // Rounded so the row only re-renders when the progress bar visibly moves.
   const progress = useGame((s) => Math.floor(Math.min(1, s.game.energy / cost) * 100) / 100)
   const affordable = progress >= 1
@@ -54,6 +69,14 @@ function UpgradeRow({ upgrade }: { upgrade: UpgradeDef & { id: UpgradeId } }) {
           <span className="font-semibold">
             <span className="mr-1.5 inline-block min-w-7 text-energy tabular-nums">{owned}×</span>
             {upgrade.name}
+            {multiplier > 1 && (
+              <span
+                className="ml-1.5 text-sm text-energy tabular-nums"
+                title={`Output ×${multiplier} from milestones`}
+              >
+                ×{multiplier}
+              </span>
+            )}
           </span>
           <span className="shrink-0 text-sm tabular-nums">
             {formatNumber(cost, { notation: 'short' })}
@@ -62,8 +85,10 @@ function UpgradeRow({ upgrade }: { upgrade: UpgradeDef & { id: UpgradeId } }) {
         </span>
         <span className="relative flex items-center justify-between gap-3 text-sm text-white/55">
           <span>
-            +{formatNumber(upgrade.eps, { decimals: 1 })}/s each
-            {owned > 0 && ` · ${formatNumber(upgrade.eps * owned, { decimals: 1 })}/s total`}
+            +{formatNumber(upgrade.eps * multiplier, { decimals: 1 })}/s each
+            {owned > 0 &&
+              ` · ${formatNumber(upgradeProduction(upgrade, owned), { decimals: 1 })}/s total`}
+            {nextMilestone && ` · ×${MILESTONE_MULTIPLIER} at ${nextMilestone}`}
           </span>
           <ModulePips owned={owned} />
         </span>

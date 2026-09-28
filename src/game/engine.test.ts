@@ -8,7 +8,9 @@ import {
   createInitialState,
   engage,
   type GameState,
+  milestoneMultiplier,
   netRate,
+  nextMilestoneAt,
   nextVisualTierAt,
   production,
   speedLevelStatus,
@@ -48,7 +50,21 @@ describe('upgrades', () => {
     const state = withState({
       owned: { ...createInitialState().owned, 'avidyne-engine': 10, 'driver-coil': 2 },
     })
-    expect(production(state)).toBeCloseTo(10 * 0.1 + 2 * 4)
+    expect(production(state)).toBeCloseTo(10 * 0.1 * 2 + 2 * 3)
+  })
+})
+
+describe('production milestones', () => {
+  it.each([
+    [0, 1, 10],
+    [9, 1, 10],
+    [10, 2, 25],
+    [25, 4, 50],
+    [50, 8, null],
+    [500, 8, null],
+  ])('owning %d multiplies output by %d, next at %s', (owned, multiplier, next) => {
+    expect(milestoneMultiplier(owned)).toBe(multiplier)
+    expect(nextMilestoneAt(owned)).toBe(next)
   })
 })
 
@@ -94,7 +110,7 @@ describe('speed levels', () => {
   it('classifies levels by what the ship can afford', () => {
     const state = withState({
       energy: 50,
-      owned: { ...createInitialState().owned, 'driver-coil': 1 }, // 4 eps
+      owned: { ...createInitialState().owned, 'driver-coil': 1 }, // 3 eps
     })
     expect(speedLevelStatus(state, 0)).toBe('engaged')
     expect(speedLevelStatus(state, levelIndex('orbit'))).toBe('sustainable')
@@ -126,20 +142,20 @@ describe('advance', () => {
     const state = withState({
       speedLevel: levelIndex('warp-1'),
       energy: 0,
-      owned: { ...createInitialState().owned, 'impulse-deck': 20 }, // 2000 eps
+      owned: { ...createInitialState().owned, 'impulse-control-system': 10 }, // 1400 eps
     })
     const { state: next, downshifted } = advance(state, 3600)
     expect(downshifted).toBe(false)
-    expect(next.energy).toBeCloseTo((2000 - 1125) * 3600)
+    expect(next.energy).toBeCloseTo((1400 - 1125) * 3600)
     expect(next.distance).toBeCloseTo(SPEED_OF_LIGHT_KMH)
-    expect(next.lifetimeEnergy).toBeCloseTo(2000 * 3600)
+    expect(next.lifetimeEnergy).toBeCloseTo(1400 * 3600)
   })
 
   it('is independent of the step size', () => {
     const state = withState({
       speedLevel: levelIndex('impulse-1-8'),
       energy: 100,
-      owned: { ...createInitialState().owned, 'avidyne-engine': 50 }, // 5 eps, drain 36
+      owned: { ...createInitialState().owned, 'avidyne-engine': 5 }, // 0.5 eps, drain 36
     })
     const once = advance(state, 10).state
     let stepped = state
@@ -152,20 +168,20 @@ describe('advance', () => {
   it('drops to a sustainable speed when the reserves run dry, keeping the distance so far', () => {
     const state = withState({
       speedLevel: levelIndex('impulse-1-8'), // drain 36
-      energy: 310,
-      owned: { ...createInitialState().owned, 'driver-coil': 1 }, // 4 eps → net -32
+      energy: 330,
+      owned: { ...createInitialState().owned, 'driver-coil': 1 }, // 3 eps → net -33
     })
     const { state: next, downshifted } = advance(state, 3600)
     expect(downshifted).toBe(true)
     expect(next.speedLevel).toBe(levelIndex('orbit'))
 
-    const burstSeconds = 310 / 32
+    const burstSeconds = 330 / 33
     const orbit = SPEED_LEVELS[levelIndex('orbit')]
     const expectedDistance =
       (0.03125 * SPEED_OF_LIGHT_KMH * burstSeconds) / 3600 +
       ((orbit?.c ?? 0) * SPEED_OF_LIGHT_KMH * (3600 - burstSeconds)) / 3600
     expect(next.distance).toBeCloseTo(expectedDistance, 3)
-    expect(next.energy).toBeCloseTo((4 - 1) * (3600 - burstSeconds))
+    expect(next.energy).toBeCloseTo((3 - 1) * (3600 - burstSeconds))
   })
 
   it('stops completely without production', () => {

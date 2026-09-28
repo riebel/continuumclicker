@@ -2,6 +2,8 @@ import {
   CLICK,
   COST_GROWTH,
   MAX_DRAIN,
+  MILESTONE_MULTIPLIER,
+  PRODUCTION_MILESTONES,
   SPEED_LEVELS,
   SPEED_OF_LIGHT_KMH,
   type SpeedLevelDef,
@@ -49,6 +51,21 @@ export function nextVisualTierAt(owned: number): number | null {
   return VISUAL_TIER_THRESHOLDS.find((threshold) => owned < threshold) ?? null
 }
 
+/** Output multiplier from production milestones reached by owning `owned` units. */
+export function milestoneMultiplier(owned: number): number {
+  return MILESTONE_MULTIPLIER ** PRODUCTION_MILESTONES.filter((m) => owned >= m).length
+}
+
+/** Owned count at which the output doubles next, or null when every milestone is reached. */
+export function nextMilestoneAt(owned: number): number | null {
+  return PRODUCTION_MILESTONES.find((m) => owned < m) ?? null
+}
+
+/** Energy per second produced by `owned` units of an upgrade. */
+export function upgradeProduction(upgrade: Pick<UpgradeDef, 'eps'>, owned: number): number {
+  return upgrade.eps * owned * milestoneMultiplier(owned)
+}
+
 export function speedLevelOf(state: GameState): SpeedLevelDef {
   return SPEED_LEVELS[state.speedLevel] ?? (SPEED_LEVELS[0] as SpeedLevelDef)
 }
@@ -60,7 +77,7 @@ export function speedKmh(state: GameState): number {
 
 /** Energy produced per second by all owned upgrades. */
 export function production(state: GameState): number {
-  return UPGRADES.reduce((sum, u) => sum + u.eps * state.owned[u.id], 0)
+  return UPGRADES.reduce((sum, u) => sum + upgradeProduction(u, state.owned[u.id]), 0)
 }
 
 /** Energy consumed per second by the engaged speed level. */
@@ -126,9 +143,20 @@ export interface ClickResult {
   readonly critical: boolean
 }
 
+/** Energy gained by a regular (non-critical) click. */
+export function clickEnergy(_state: GameState): number {
+  return CLICK.energy
+}
+
+/** Average energy per click, crits included. */
+export function expectedClickEnergy(state: GameState): number {
+  return clickEnergy(state) * (1 + CLICK.criticalChance * (CLICK.criticalMultiplier - 1))
+}
+
 export function click(state: GameState, random: () => number = Math.random): ClickResult {
   const critical = random() < CLICK.criticalChance
-  const gained = critical ? CLICK.energy * CLICK.criticalMultiplier : CLICK.energy
+  const base = clickEnergy(state)
+  const gained = critical ? base * CLICK.criticalMultiplier : base
   return {
     critical,
     gained,

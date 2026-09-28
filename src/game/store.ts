@@ -9,6 +9,7 @@ import {
   createInitialState,
   engage,
   type GameState,
+  milestoneMultiplier,
   visualTier,
 } from './engine'
 import { formatDuration, formatNumber } from './format'
@@ -101,10 +102,19 @@ export function createGameStore(storage: Storage = browserStorage(), now = Date.
           get().actions.tick()
           const before = get().game.owned[id]
           set((s) => ({ game: buyUpgrade(s.game, id) }))
-          const tier = visualTier(get().game.owned[id])
+          const after = get().game.owned[id]
+          const name = UPGRADES.find((u) => u.id === id)?.name ?? id
+          const tier = visualTier(after)
+          const boosted = milestoneMultiplier(after) > milestoneMultiplier(before)
+          const boost = boosted ? `${name} output doubled.` : undefined
           if (tier > visualTier(before)) {
-            const name = UPGRADES.find((u) => u.id === id)?.name ?? id
-            notify({ kind: 'success', title: `Ship upgraded: ${name} module ${tier}/5 installed` })
+            notify({
+              kind: 'success',
+              title: `Ship upgraded: ${name} module ${tier}/5 installed`,
+              ...(boost && { message: boost }),
+            })
+          } else if (boost) {
+            notify({ kind: 'success', title: boost })
           }
         },
 
