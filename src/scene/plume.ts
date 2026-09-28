@@ -126,22 +126,20 @@ export function attachPlume(nozzle: Object3D, kind: NozzleKind, radius: number):
 export interface PlumeDrive {
   /** 0..1 engaged speed. */
   throttle: number
-  /** 0..1 short boost after a click. */
-  boost: number
   time: number
   dt: number
 }
 
 /** Updates plume length, brightness and flicker for the current drive state. */
-export function updatePlume(plume: Plume, { throttle, boost, time, dt }: PlumeDrive) {
+export function updatePlume(plume: Plume, { throttle, time, dt }: PlumeDrive) {
   let power: number
   if (plume.kind === 'rcs') {
-    // Manoeuvring jets fire short random puffs, more of them while clicking.
-    if (Math.random() < dt * (0.35 + boost * 6)) plume.pulse = 1
+    // Manoeuvring jets fire short random puffs.
+    if (Math.random() < dt * 0.35) plume.pulse = 1
     plume.pulse = Math.max(0, plume.pulse - dt * 5)
     power = plume.pulse
   } else {
-    power = Math.min(1.3, 0.07 + throttle * 0.95 + boost * 0.35)
+    power = Math.min(1.3, 0.07 + throttle * 0.95)
   }
 
   const visible = power > 0.01

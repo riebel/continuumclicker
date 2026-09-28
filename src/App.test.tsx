@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
@@ -12,26 +12,53 @@ const setEnergy = (energy: number) => gameStore.setState((s) => ({ game: { ...s.
 describe('App', () => {
   beforeEach(() => gameStore.getState().actions.reset())
 
-  it('generates energy when the ship is clicked', async () => {
+  it('mines the asteroid when the stage is clicked', async () => {
     const user = userEvent.setup()
     render(<App />)
-    const ship = screen.getByRole('button', { name: /feed the reactors/i })
+    const stage = screen.getByRole('button', { name: /fire the mining laser/i })
 
-    await user.click(ship)
-    await user.click(ship)
+    await user.click(stage)
+    await user.click(stage)
 
     expect(gameStore.getState().game.clicks).toBe(2)
     expect(gameStore.getState().game.energy).toBeGreaterThanOrEqual(2)
+    expect(gameStore.getState().game.asteroid.hp).toBe(2)
+  })
+
+  it('keeps firing while the button is held', async () => {
+    vi.useFakeTimers()
+    try {
+      render(<App />)
+      const stage = screen.getByRole('button', { name: /fire the mining laser/i })
+      fireEvent.pointerDown(stage, { button: 0, pointerId: 1 })
+      vi.advanceTimersByTime(1000)
+      fireEvent.pointerUp(stage, { button: 0, pointerId: 1 })
+      vi.advanceTimersByTime(1000)
+      expect(gameStore.getState().game.clicks).toBe(5)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('is playable with the keyboard', async () => {
     const user = userEvent.setup()
     render(<App />)
-    screen.getByRole('button', { name: /feed the reactors/i }).focus()
+    screen.getByRole('button', { name: /fire the mining laser/i }).focus()
 
     await user.keyboard('{Enter}')
 
     expect(gameStore.getState().game.clicks).toBe(1)
+  })
+
+  it('upgrades the mining laser', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    setEnergy(60)
+
+    await user.click(await screen.findByRole('button', { name: /laser amplifier/i }))
+
+    expect(gameStore.getState().game.lasers['laser-amplifier']).toBe(1)
+    expect(screen.getByText(/2\.0\/hit/)).toBeInTheDocument()
   })
 
   it('buys an upgrade only when it is affordable', async () => {

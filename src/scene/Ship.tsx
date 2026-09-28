@@ -7,7 +7,7 @@ import {
   type Material,
   type Mesh,
   MeshStandardMaterial,
-  type Object3D,
+  Object3D,
   type PointLight,
   Vector3,
 } from 'three'
@@ -15,7 +15,7 @@ import shipUrl from '../assets/ship.glb?url'
 import { UPGRADES } from '../game/content'
 import { visualTier, warpIntensity } from '../game/engine'
 import { gameStore, useGame } from '../game/store'
-import { CAMERA_DISTANCE, CAMERA_FOV, HEADING, SHIP_ORIENTATION } from './constants'
+import { HEADING, layoutPosition, SHIP_LAYOUT, SHIP_ORIENTATION, stageBox } from './constants'
 import { attachPlume, disposePlume, type NozzleKind, type Plume, updatePlume } from './plume'
 
 interface ModuleNode {
@@ -31,6 +31,8 @@ interface ModuleNode {
 }
 
 interface PreparedShip {
+  /** Marker at the tip of the bow, where the mining laser fires from. */
+  readonly bow: Object3D
   readonly modules: ModuleNode[]
   readonly plumes: Plume[]
   readonly center: Vector3
@@ -87,8 +89,14 @@ function prepare(scene: Group): PreparedShip {
     if (!(name in EMISSIVE_BASE) && name !== 'EngineGlow') material.envMapIntensity = 1.2
   }
 
+  // The model's forward axis is +X.
+  const bow = new Object3D()
+  bow.position.set(bounds.max.x, center.y, center.z)
+  scene.add(bow)
+
   const byName = (name: string) => [...materials.values()].filter((m) => m.name === name)
   return {
+    bow,
     modules,
     plumes,
     center,
@@ -110,33 +118,24 @@ function useTiers(): Record<string, number> {
 const easeOutBack = (t: number) => 1 + 2.2 * (t - 1) ** 3 + 1.2 * (t - 1) ** 2
 
 interface ShipProps {
-  /** The HTML element (the clickable ship button) the model is fitted into. */
+  /** The HTML element (the stage button) the model is fitted into. */
   anchor: RefObject<HTMLElement | null>
+  /** Receives the world position of the bow every frame. */
+  bow: Vector3
   reducedMotion: boolean
 }
 
-export function Ship({ anchor, reducedMotion }: ShipProps) {
+export function Ship({ anchor, bow, reducedMotion }: ShipProps) {
   const { scene } = useGLTF(shipUrl, false, true)
   const ship = useMemo(() => prepare(scene), [scene])
   const tiers = useTiers()
   const root = useRef<Group>(null)
   const light = useRef<PointLight>(null)
-  const boost = useRef(0)
   const throttle = useRef(0)
   const mounted = useRef(false)
   const temp = useMemo(() => ({ v: new Vector3(), sum: new Vector3(), pivot: new Vector3() }), [])
 
   useEffect(() => () => ship.plumes.forEach(disposePlume), [ship])
-
-  // Clicking fires the engines harder for a moment.
-  useEffect(
-    () =>
-      gameStore.subscribe((state, previous) => {
-        if (state.game.clicks > previous.game.clicks)
-          boost.current = Math.min(1.5, boost.current + 0.6)
-      }),
-    [],
-  )
 
   useLayoutEffect(() => {
     const now = performance.now()
@@ -155,22 +154,12 @@ export function Ship({ anchor, reducedMotion }: ShipProps) {
     const dt = Math.min(delta, 0.1)
     const time = state.clock.elapsedTime
 
-    // Fit the ship into the anchor element's box.
-    const rect = element.getBoundingClientRect()
-    const { width, height } = state.size
-    const visibleHeight = 2 * CAMERA_DISTANCE * Math.tan((CAMERA_FOV * Math.PI) / 360)
-    const visibleWidth = (visibleHeight * width) / height
-    const size = (Math.min(rect.width, rect.height) / height) * visibleHeight
-    const scale = (size / (2 * ship.radius)) * 1.2
-    boost.current = Math.max(0, boost.current - dt * 1.8)
-    const kick = boost.current * 0.02 * size
-    const bob = reducedMotion ? 0 : Math.sin(time * 0.6) * 0.015 * size
-    group.position.set(
-      ((rect.left + rect.width / 2) / width - 0.5) * visibleWidth + HEADING.x * kick,
-      -((rect.top + rect.height / 2) / height - 0.5) * visibleHeight + HEADING.y * kick + bob,
-      HEADING.z * kick,
-    )
-    group.scale.setScalar(scale)
+    // Fit the ship into its spot in the anchor element's box.
+    const box = stageBox(element.getBoundingClientRect(), state.size)
+    const size = box.size * SHIP_LAYOUT.size
+    layoutPosition(box, SHIP_LAYOUT, group.position)
+    if (!reducedMotion) group.position.y += Math.sin(time * 0.6) * 0.015 * size
+    group.scale.setScalar((size / (2 * ship.radius)) * 1.2)
 
     // Gentle drift and parallax towards the pointer.
     const sway = reducedMotion ? 0 : 1
@@ -182,8 +171,8 @@ export function Ship({ anchor, reducedMotion }: ShipProps) {
     // Engines follow the engaged speed level, spooling smoothly.
     const target = warpIntensity(gameStore.getState().game)
     throttle.current += (target - throttle.current) * Math.min(1, dt * 1.5)
-    const drive = { throttle: throttle.current, boost: Math.min(1, boost.current), time, dt }
-    const glow = 2 + throttle.current * 7 + drive.boost * 4
+    const drive = { throttle: throttle.current, time, dt }
+    const glow = 2 + throttle.current * 7
     for (const material of ship.engineGlow) material.emissiveIntensity = glow
     for (const material of ship.reactor) {
       material.emissiveIntensity = REACTOR_GLOW * (0.8 + 0.25 * Math.sin(time * 2.4))
@@ -202,9 +191,12 @@ export function Ship({ anchor, reducedMotion }: ShipProps) {
       light.current.position
         .copy(temp.sum.divideScalar(engines))
         .addScaledVector(HEADING, -0.5 * size)
-      light.current.intensity = (0.6 + throttle.current * 2 + drive.boost) * size * size
+      light.current.intensity = (0.6 + throttle.current * 2) * size * size
       light.current.distance = size * 2.5
     }
+
+    group.updateMatrixWorld()
+    ship.bow.getWorldPosition(bow)
 
     // Newly installed modules grow into place from their own centre.
     const now = performance.now()

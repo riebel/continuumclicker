@@ -1,5 +1,11 @@
 import * as z from 'zod/mini'
-import { SPEED_LEVELS, SPEED_OF_LIGHT_KMH, UPGRADES } from './content'
+import {
+  LASER_UPGRADES,
+  type LaserUpgradeDef,
+  SPEED_LEVELS,
+  SPEED_OF_LIGHT_KMH,
+  UPGRADES,
+} from './content'
 import { createInitialState, type GameState } from './engine'
 
 export const SAVE_KEY = 'continuum-clicker:save'
@@ -20,6 +26,9 @@ const saveSchema = z.object({
   distance: amount,
   speedLevel: z.string(),
   owned: z.record(z.string(), count),
+  // Added with asteroid mining; older version 3 saves lack them.
+  lasers: z.optional(z.record(z.string(), count)),
+  asteroidsMined: z.optional(count),
   clicks: count,
   lifetimeEnergy: amount,
 })
@@ -49,6 +58,8 @@ export function toSaveData(state: GameState, savedAt: number): SaveData {
     distance: state.distance,
     speedLevel: SPEED_LEVELS[state.speedLevel]?.id ?? 'stop',
     owned: { ...state.owned },
+    lasers: { ...state.lasers },
+    asteroidsMined: state.asteroidsMined,
     clicks: state.clicks,
     lifetimeEnergy: state.lifetimeEnergy,
   }
@@ -59,6 +70,11 @@ export function fromSaveData(data: SaveData): LoadedGame {
   const initial = createInitialState()
   const owned = { ...initial.owned }
   for (const upgrade of UPGRADES) owned[upgrade.id] = data.owned[upgrade.id] ?? 0
+  const lasers = { ...initial.lasers }
+  for (const upgrade of LASER_UPGRADES) {
+    const { maxLevel = Number.POSITIVE_INFINITY }: LaserUpgradeDef = upgrade
+    lasers[upgrade.id] = Math.min(data.lasers?.[upgrade.id] ?? 0, maxLevel)
+  }
 
   return {
     savedAt: data.savedAt,
@@ -71,6 +87,8 @@ export function fromSaveData(data: SaveData): LoadedGame {
         SPEED_LEVELS.findIndex((level) => level.id === data.speedLevel),
       ),
       owned,
+      lasers,
+      asteroidsMined: data.asteroidsMined ?? 0,
       clicks: data.clicks,
       lifetimeEnergy: data.lifetimeEnergy,
     },

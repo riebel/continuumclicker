@@ -4,9 +4,9 @@ import { cn } from './ui/cn'
 import { EnergyReadout, FlightReadout } from './ui/Hud'
 import { Menu } from './ui/Menu'
 import { Notices } from './ui/Notices'
-import { type SceneState, Ship } from './ui/Ship'
 import { ShipStage, supportsWebGL } from './ui/ShipStage'
 import { SpeedPanel } from './ui/SpeedPanel'
+import { type SceneState, Stage } from './ui/Stage'
 import { UpgradePanel } from './ui/UpgradePanel'
 import { useGameLoop } from './ui/useGameLoop'
 
@@ -46,7 +46,7 @@ export function App() {
           </div>
           <EnergyReadout />
           <div className="flex min-h-0 w-full flex-1 items-center justify-center [container-type:size]">
-            <Ship ref={shipRef} scene={scene} />
+            <Stage ref={shipRef} scene={scene} />
           </div>
           <FlightReadout />
         </section>

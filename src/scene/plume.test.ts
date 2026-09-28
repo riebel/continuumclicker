@@ -2,7 +2,7 @@ import { Object3D } from 'three'
 import { describe, expect, it } from 'vitest'
 import { attachPlume, updatePlume } from './plume'
 
-const drive = { throttle: 0, boost: 0, time: 1, dt: 1 / 60 }
+const drive = { throttle: 0, time: 1, dt: 1 / 60 }
 const length = (plume: ReturnType<typeof attachPlume>) =>
   plume.outer.material.uniforms.uLength?.value as number
 

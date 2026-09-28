@@ -1,6 +1,10 @@
 import {
-  CLICK,
+  ASTEROIDS,
   COST_GROWTH,
+  LASER,
+  LASER_UPGRADES,
+  type LaserUpgradeDef,
+  type LaserUpgradeId,
   MAX_DRAIN,
   MILESTONE_MULTIPLIER,
   PRODUCTION_MILESTONES,
@@ -13,6 +17,15 @@ import {
   VISUAL_TIER_THRESHOLDS,
 } from './content'
 
+export type AsteroidKind = 'rock' | 'crystal'
+
+export interface Asteroid {
+  readonly kind: AsteroidKind
+  /** Hits left until it breaks. */
+  readonly hp: number
+  readonly maxHp: number
+}
+
 export interface GameState {
   /** Stored energy. Never negative. */
   readonly energy: number
@@ -21,6 +34,11 @@ export interface GameState {
   /** Index into SPEED_LEVELS. */
   readonly speedLevel: number
   readonly owned: Readonly<Record<UpgradeId, number>>
+  readonly lasers: Readonly<Record<LaserUpgradeId, number>>
+  /** The asteroid in the mining laser's sights. Not saved: a fresh one is found on load. */
+  readonly asteroid: Asteroid
+  readonly asteroidsMined: number
+  /** Laser shots fired. */
   readonly clicks: number
   /** All energy ever gained, from clicks and production. */
   readonly lifetimeEnergy: number
@@ -32,6 +50,12 @@ export function createInitialState(): GameState {
     distance: 0,
     speedLevel: 0,
     owned: Object.fromEntries(UPGRADES.map((u) => [u.id, 0])) as Record<UpgradeId, number>,
+    lasers: Object.fromEntries(LASER_UPGRADES.map((u) => [u.id, 0])) as Record<
+      LaserUpgradeId,
+      number
+    >,
+    asteroid: { kind: 'rock', hp: 4, maxHp: 4 },
+    asteroidsMined: 0,
     clicks: 0,
     lifetimeEnergy: 0,
   }
@@ -137,34 +161,115 @@ export function buyUpgrade(state: GameState, id: UpgradeId): GameState {
   }
 }
 
-export interface ClickResult {
-  readonly state: GameState
+export function laserCost(upgrade: LaserUpgradeDef, level: number): number {
+  return upgrade.baseCost * upgrade.costGrowth ** level
+}
+
+export function isLaserMaxed(state: GameState, id: LaserUpgradeId): boolean {
+  const upgrade: LaserUpgradeDef | undefined = LASER_UPGRADES.find((u) => u.id === id)
+  return upgrade?.maxLevel !== undefined && state.lasers[id] >= upgrade.maxLevel
+}
+
+export function canBuyLaser(state: GameState, id: LaserUpgradeId): boolean {
+  const upgrade = LASER_UPGRADES.find((u) => u.id === id)
+  return (
+    upgrade !== undefined &&
+    !isLaserMaxed(state, id) &&
+    laserCost(upgrade, state.lasers[id]) <= state.energy
+  )
+}
+
+export function buyLaser(state: GameState, id: LaserUpgradeId): GameState {
+  const upgrade = LASER_UPGRADES.find((u) => u.id === id)
+  if (!upgrade || !canBuyLaser(state, id)) return state
+  return {
+    ...state,
+    energy: state.energy - laserCost(upgrade, state.lasers[id]),
+    lasers: { ...state.lasers, [id]: state.lasers[id] + 1 },
+  }
+}
+
+/**
+ * Energy of a regular hit on a rock. Grows with the reactors (gross output, so flying fast does
+ * not weaken the laser), which keeps mining worthwhile at every stage of the game.
+ */
+export function hitEnergy(state: GameState): number {
+  const amplifier = state.lasers['laser-amplifier']
+  const share = LASER.productionShare + 0.002 * amplifier
+  return LASER.baseEnergy * (1 + amplifier) + share * production(state)
+}
+
+export function critChance(state: GameState): number {
+  return LASER.critChance + 0.025 * state.lasers['precision-scanner']
+}
+
+export function critMultiplier(state: GameState): number {
+  return LASER.critMultiplier + 0.5 * state.lasers['crystal-resonator']
+}
+
+/** Break bonus as a share of the value of all regular hits the asteroid took. */
+export function breakBonus(state: GameState): number {
+  return LASER.breakBonus + 0.1 * state.lasers['crystal-resonator']
+}
+
+function kindMultiplier(kind: AsteroidKind): number {
+  return kind === 'crystal' ? ASTEROIDS.crystal.energyMultiplier : 1
+}
+
+/** Average energy per shot over many asteroids: crits, break bonuses and crystals included. */
+export function expectedHitEnergy(state: GameState): number {
+  const { rock, crystal } = ASTEROIDS
+  const rockHits = (1 - crystal.chance) * ((rock.minHp + rock.maxHp) / 2)
+  const crystalHits = crystal.chance * crystal.hp
+  const crystalShare = crystalHits / (rockHits + crystalHits)
+  const kinds = 1 + crystalShare * (crystal.energyMultiplier - 1)
+  const crits = 1 + critChance(state) * (critMultiplier(state) - 1)
+  return hitEnergy(state) * kinds * (crits + breakBonus(state))
+}
+
+export function createAsteroid(random: () => number = Math.random): Asteroid {
+  const { rock, crystal } = ASTEROIDS
+  if (random() < crystal.chance) return { kind: 'crystal', hp: crystal.hp, maxHp: crystal.hp }
+  const hp = rock.minHp + Math.floor(random() * (rock.maxHp - rock.minHp + 1))
+  return { kind: 'rock', hp, maxHp: hp }
+}
+
+export interface Shot {
+  /** Energy from the hit itself. */
   readonly gained: number
   readonly critical: boolean
+  /** Extra energy for breaking the asteroid, 0 if it survived. */
+  readonly bonus: number
+  /** The asteroid that was hit, after the hit. */
+  readonly target: Asteroid
 }
 
-/** Energy gained by a regular (non-critical) click. */
-export function clickEnergy(_state: GameState): number {
-  return CLICK.energy
+export interface ShotResult extends Shot {
+  readonly state: GameState
 }
 
-/** Average energy per click, crits included. */
-export function expectedClickEnergy(state: GameState): number {
-  return clickEnergy(state) * (1 + CLICK.criticalChance * (CLICK.criticalMultiplier - 1))
-}
+/** Fires the mining laser at the current asteroid. A broken asteroid is replaced right away. */
+export function fire(state: GameState, random: () => number = Math.random): ShotResult {
+  const hit = hitEnergy(state) * kindMultiplier(state.asteroid.kind)
+  const critical = random() < critChance(state)
+  const gained = critical ? hit * critMultiplier(state) : hit
+  const target = { ...state.asteroid, hp: state.asteroid.hp - 1 }
+  const broken = target.hp <= 0
+  const bonus = broken ? hit * target.maxHp * breakBonus(state) : 0
+  const earned = gained + bonus
 
-export function click(state: GameState, random: () => number = Math.random): ClickResult {
-  const critical = random() < CLICK.criticalChance
-  const base = clickEnergy(state)
-  const gained = critical ? base * CLICK.criticalMultiplier : base
   return {
-    critical,
     gained,
+    critical,
+    bonus,
+    target,
     state: {
       ...state,
-      energy: state.energy + gained,
-      lifetimeEnergy: state.lifetimeEnergy + gained,
+      energy: state.energy + earned,
+      lifetimeEnergy: state.lifetimeEnergy + earned,
       clicks: state.clicks + 1,
+      asteroid: broken ? createAsteroid(random) : target,
+      asteroidsMined: state.asteroidsMined + (broken ? 1 : 0),
     },
   }
 }

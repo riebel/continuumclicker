@@ -1,0 +1,241 @@
+import { m, useReducedMotion } from 'motion/react'
+import {
+  type MouseEvent,
+  type PointerEvent,
+  type RefObject,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
+import posterUrl from '../assets/ship-poster.webp'
+import { ASTEROIDS, LASER } from '../game/content'
+import { formatNumber } from '../game/format'
+import { useActions, useGame } from '../game/store'
+import { asteroidOnScreen } from '../scene/target'
+import { cn } from './cn'
+
+export type SceneState = 'loading' | 'ready' | 'unavailable'
+
+type Tone = 'hit' | 'crit' | 'crystal' | 'bonus'
+
+interface Popup {
+  id: number
+  x: number
+  y: number
+  amount: number
+  tone: Tone
+  driftX: number
+  driftY: number
+  duration: number
+}
+
+const MAX_POPUPS = 40
+
+const TONES: Record<Tone, string> = {
+  hit: 'text-2xl font-bold text-white',
+  crystal: 'text-3xl font-bold text-crystal',
+  crit: 'text-5xl font-black text-energy',
+  bonus: 'text-4xl font-black text-energy',
+}
+
+/** Where the asteroid is drawn: from the 3D scene, or a fixed spot in the stage without WebGL. */
+function asteroidPosition(stage: HTMLElement | null) {
+  if (asteroidOnScreen.visible) return asteroidOnScreen
+  const rect = stage?.getBoundingClientRect()
+  if (!rect) return { x: 0, y: 0, radius: 0 }
+  const size = Math.min(rect.width, rect.height)
+  return {
+    x: rect.left + rect.width / 2 + size * 0.33,
+    y: rect.top + rect.height / 2 - size * 0.3,
+    radius: size * 0.1,
+  }
+}
+
+/** Hit points of the targeted asteroid, following it on screen. */
+function AsteroidStatus({
+  stage,
+  scene,
+}: {
+  stage: RefObject<HTMLElement | null>
+  scene: SceneState
+}) {
+  const { hp, maxHp, kind } = useGame((s) => s.game.asteroid)
+  const box = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    let frame = requestAnimationFrame(function follow() {
+      const { x, y, radius } = asteroidPosition(stage.current)
+      if (box.current) box.current.style.transform = `translate(${x}px, ${y + radius * 1.15}px)`
+      frame = requestAnimationFrame(follow)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [stage])
+
+  const crystal = kind === 'crystal'
+  return (
+    <div
+      ref={box}
+      className="pointer-events-none fixed top-0 left-0 z-20 flex flex-col items-center"
+      aria-hidden="true"
+    >
+      <div className="flex -translate-x-1/2 flex-col items-center gap-1">
+        {scene === 'unavailable' && (
+          <span
+            className={cn(
+              'mb-1 size-16 -translate-y-24 rounded-[45%_55%_50%_50%] shadow-inner',
+              crystal ? 'bg-cyan-900 ring-2 ring-crystal' : 'bg-stone-600',
+            )}
+          />
+        )}
+        <span className="flex gap-0.5">
+          {Array.from({ length: maxHp }, (_, i) => (
+            <span
+              // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length pips
+              key={i}
+              className={cn(
+                'h-1 w-2.5 rounded-full transition-colors',
+                i < hp ? (crystal ? 'bg-crystal' : 'bg-burst') : 'bg-white/15',
+              )}
+            />
+          ))}
+        </span>
+        {crystal && (
+          <span className="glow text-xs font-bold tracking-widest text-crystal uppercase">
+            Crystal ×{ASTEROIDS.crystal.energyMultiplier}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+interface StageProps {
+  ref: RefObject<HTMLButtonElement | null>
+  scene: SceneState
+}
+
+/**
+ * The play area. The 3D ship and asteroid are rendered by the WebGL scene behind the UI and
+ * fitted into this button's box; the button itself stays a plain, keyboard-accessible control.
+ * Click or tap to fire the mining laser, hold to keep firing.
+ */
+export function Stage({ ref, scene }: StageProps) {
+  const actions = useActions()
+  const reducedMotion = useReducedMotion()
+  const [popups, setPopups] = useState<Popup[]>([])
+  const nextId = useRef(0)
+  const autoFire = useRef<number | undefined>(undefined)
+
+  const shoot = () => {
+    const shot = actions.fire()
+    const { x, y, radius } = asteroidPosition(ref.current)
+    const popup = (amount: number, tone: Tone): Popup => ({
+      id: nextId.current++,
+      x: x + (Math.random() - 0.5) * radius * 1.2,
+      y: y - radius * 0.2,
+      amount,
+      tone,
+      driftX: (Math.random() - 0.5) * 120,
+      driftY: -(110 + Math.random() * 90),
+      duration: tone === 'bonus' ? 1.8 : 1.1 + Math.random() * 0.4,
+    })
+    const tone = shot.critical ? 'crit' : shot.target.kind === 'crystal' ? 'crystal' : 'hit'
+    const added = [popup(shot.gained, tone)]
+    if (shot.bonus > 0) added.push({ ...popup(shot.bonus, 'bonus'), x, driftX: 0 })
+    setPopups((current) => [...current.slice(-MAX_POPUPS + added.length), ...added])
+  }
+
+  const stopFiring = () => {
+    clearInterval(autoFire.current)
+    autoFire.current = undefined
+  }
+  useEffect(() => {
+    const stop = () => {
+      clearInterval(autoFire.current)
+      autoFire.current = undefined
+    }
+    window.addEventListener('blur', stop)
+    return () => {
+      window.removeEventListener('blur', stop)
+      stop()
+    }
+  }, [])
+
+  const onPointerDown = (event: PointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    } catch {
+      // Not every environment supports capture; releasing outside then just ends the burst.
+    }
+    shoot()
+    stopFiring()
+    autoFire.current = window.setInterval(shoot, 1000 / LASER.autoFireRate)
+  }
+
+  // Pointer shots fire on press; this only handles keyboard activation (Enter / Space).
+  const onClick = (event: MouseEvent<HTMLButtonElement>) => {
+    if (event.detail === 0) shoot()
+  }
+
+  const remove = (id: number) => setPopups((current) => current.filter((p) => p.id !== id))
+
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        onPointerDown={onPointerDown}
+        onPointerUp={stopFiring}
+        onPointerCancel={stopFiring}
+        onLostPointerCapture={stopFiring}
+        onClick={onClick}
+        onContextMenu={(event) => event.preventDefault()}
+        aria-label="Fire the mining laser at the asteroid (hold to keep firing)"
+        className="relative aspect-square w-[min(100cqw,100cqh,44rem)] cursor-crosshair touch-manipulation rounded-full"
+      >
+        {scene === 'unavailable' && (
+          <img
+            src={posterUrl}
+            alt=""
+            draggable={false}
+            className="pointer-events-none size-full object-contain"
+          />
+        )}
+        {scene === 'loading' && (
+          <span className="glow animate-pulse text-sm font-semibold tracking-widest text-white/50 uppercase">
+            Spooling up reactors…
+          </span>
+        )}
+      </button>
+
+      {scene !== 'loading' && <AsteroidStatus stage={ref} scene={scene} />}
+
+      <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-30 overflow-hidden">
+        {popups.map((p) => (
+          <m.span
+            key={p.id}
+            className={cn('glow absolute -translate-1/2 italic tabular-nums', TONES[p.tone])}
+            style={{ left: p.x, top: p.y }}
+            initial={{ opacity: 1, x: 0, y: 0, scale: p.tone === 'crit' ? 0.6 : 0.8 }}
+            animate={
+              reducedMotion
+                ? { opacity: 0 }
+                : {
+                    opacity: [1, 1, 0],
+                    x: p.driftX,
+                    y: p.driftY,
+                    scale: p.tone === 'crit' || p.tone === 'bonus' ? 1.25 : 1,
+                  }
+            }
+            transition={{ duration: p.duration, ease: 'easeOut' }}
+            onAnimationComplete={() => remove(p.id)}
+          >
+            +{formatNumber(p.amount)}
+            {p.tone === 'crit' && '!'}
+          </m.span>
+        ))}
+      </div>
+    </>
+  )
+}

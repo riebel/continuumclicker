@@ -1,15 +1,16 @@
 import { useStore } from 'zustand'
 import { createStore } from 'zustand/vanilla'
-import { SPEED_LEVELS, UPGRADES, type UpgradeId } from './content'
+import { type LaserUpgradeId, SPEED_LEVELS, UPGRADES, type UpgradeId } from './content'
 import {
   advance,
+  buyLaser,
   buyUpgrade,
-  type ClickResult,
-  click,
   createInitialState,
   engage,
+  fire,
   type GameState,
   milestoneMultiplier,
+  type Shot,
   visualTier,
 } from './engine'
 import { formatDuration, formatNumber } from './format'
@@ -32,10 +33,13 @@ export interface GameStore {
   /** Epoch ms up to which the simulation has been advanced. */
   readonly lastTick: number
   readonly notices: readonly Notice[]
+  /** The most recent laser shot, for effects. Not saved. */
+  readonly lastShot: (Shot & { readonly id: number }) | null
   readonly actions: {
     tick(now?: number): void
-    click(random?: () => number): ClickResult
+    fire(random?: () => number): Shot
     buy(id: UpgradeId): void
+    buyLaser(id: LaserUpgradeId): void
     engage(speedLevel: number): void
     save(options?: { announce?: boolean; now?: number }): void
     reset(): void
@@ -49,6 +53,7 @@ type Storage = Parameters<typeof saveGame>[0]
 export function createGameStore(storage: Storage = browserStorage(), now = Date.now()) {
   const loaded = loadGame(storage, now)
   let noticeId = 0
+  let shotId = 0
 
   return createStore<GameStore>()((set, get) => {
     const notify = (notice: Omit<Notice, 'id'>) => {
@@ -60,6 +65,7 @@ export function createGameStore(storage: Storage = browserStorage(), now = Date.
       game: loaded?.state ?? createInitialState(),
       lastTick: loaded ? Math.min(loaded.savedAt, now) : now,
       notices: [],
+      lastShot: null,
       actions: {
         tick(time = Date.now()) {
           const { game, lastTick } = get()
@@ -91,11 +97,11 @@ export function createGameStore(storage: Storage = browserStorage(), now = Date.
           }
         },
 
-        click(random) {
+        fire(random) {
           get().actions.tick()
-          const result = click(get().game, random)
-          set({ game: result.state })
-          return result
+          const { state, ...shot } = fire(get().game, random)
+          set({ game: state, lastShot: { ...shot, id: ++shotId } })
+          return shot
         },
 
         buy(id) {
@@ -118,6 +124,11 @@ export function createGameStore(storage: Storage = browserStorage(), now = Date.
           }
         },
 
+        buyLaser(id) {
+          get().actions.tick()
+          set((s) => ({ game: buyLaser(s.game, id) }))
+        },
+
         engage(speedLevel) {
           get().actions.tick()
           set((s) => ({ game: engage(s.game, speedLevel) }))
@@ -132,7 +143,7 @@ export function createGameStore(storage: Storage = browserStorage(), now = Date.
 
         reset() {
           clearSave(storage)
-          set({ game: createInitialState(), lastTick: Date.now(), notices: [] })
+          set({ game: createInitialState(), lastTick: Date.now(), notices: [], lastShot: null })
         },
 
         notify,

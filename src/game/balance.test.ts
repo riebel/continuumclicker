@@ -45,22 +45,34 @@ describe('active play', () => {
     expect(longestWait(active.purchases, 8 * HOUR)).toBeLessThan(30 * MINUTE)
   })
 
-  it('reaches sustained maximum warp after about a day, not sooner', () => {
+  it('earns two to three times the reactor output by mining', () => {
+    for (const { time, production, total } of active.income) {
+      if (time < 10 * MINUTE) continue
+      expect(total / production).toBeGreaterThan(1.6)
+      expect(total / production).toBeLessThan(3.5)
+    }
+  })
+
+  it('maxes out every laser upgrade that has a cap', () => {
+    expect(active.state.lasers['precision-scanner']).toBe(10)
+    expect(active.state.lasers['crystal-resonator']).toBe(10)
+  })
+
+  it('reaches sustained maximum warp in about half a day', () => {
     expect(active.maxWarpAt).not.toBeNull()
-    expect(active.maxWarpAt).toBeGreaterThan(18 * HOUR)
-    expect(active.maxWarpAt).toBeLessThan(36 * HOUR)
+    expect(active.maxWarpAt).toBeGreaterThan(8 * HOUR)
+    expect(active.maxWarpAt).toBeLessThan(18 * HOUR)
   })
 })
 
 describe('idle play', () => {
   it('never gets stuck', () => {
     expect(Math.max(...unlockTimes(idle))).toBeLessThan(6 * HOUR)
-    expect(idle.maxWarpAt).not.toBeNull()
   })
 
-  it('is slower than active play', () => {
-    const lastActive = Math.max(...unlockTimes(active))
-    const lastIdle = Math.max(...unlockTimes(idle))
-    expect(lastIdle).toBeGreaterThan(lastActive)
+  it('reaches sustained maximum warp after about a day, not sooner', () => {
+    expect(idle.maxWarpAt).not.toBeNull()
+    expect(idle.maxWarpAt).toBeGreaterThan(24 * HOUR)
+    expect(idle.maxWarpAt).toBeLessThan(40 * HOUR)
   })
 })

@@ -101,8 +101,61 @@ export const SPEED_LEVELS: readonly SpeedLevelDef[] = [
 
 export const MAX_DRAIN = SPEED_LEVELS.at(-1)?.drain ?? 1
 
-export const CLICK = {
-  energy: 1,
-  criticalChance: 0.05,
-  criticalMultiplier: 2,
+/** The mining laser. Every click or tap fires one shot at the targeted asteroid. */
+export const LASER = {
+  /** Energy of a hit before upgrades. */
+  baseEnergy: 1,
+  /** Share of gross reactor output added to every hit. */
+  productionShare: 0.06,
+  critChance: 0.05,
+  critMultiplier: 3,
+  /** Energy for breaking an asteroid, as a share of the value of all hits it took. */
+  breakBonus: 0.5,
+  /** Shots per second while the fire button is held down. */
+  autoFireRate: 4,
 } as const
+
+export const ASTEROIDS = {
+  rock: { minHp: 3, maxHp: 6 },
+  /** Rare, tougher, and every hit is worth `energyMultiplier` times as much. */
+  crystal: { chance: 0.06, hp: 10, energyMultiplier: 3 },
+} as const
+
+export interface LaserUpgradeDef {
+  readonly id: string
+  readonly name: string
+  /** What one level does. */
+  readonly effect: string
+  readonly baseCost: number
+  /** Each level costs this much more than the one before. */
+  readonly costGrowth: number
+  readonly maxLevel?: number
+}
+
+export const LASER_UPGRADES = [
+  {
+    id: 'laser-amplifier',
+    name: 'Laser amplifier',
+    effect: 'Hits gain +1 energy and +0.2% of reactor output',
+    baseCost: 50,
+    costGrowth: 5,
+  },
+  {
+    id: 'precision-scanner',
+    name: 'Precision scanner',
+    effect: '+2.5% critical hit chance',
+    baseCost: 250,
+    costGrowth: 4,
+    maxLevel: 10,
+  },
+  {
+    id: 'crystal-resonator',
+    name: 'Crystal resonator',
+    effect: 'Critical hits ×0.5 stronger, +10% break bonus',
+    baseCost: 1_000,
+    costGrowth: 4,
+    maxLevel: 10,
+  },
+] as const satisfies readonly LaserUpgradeDef[]
+
+export type LaserUpgradeId = (typeof LASER_UPGRADES)[number]['id']

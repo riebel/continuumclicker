@@ -64,7 +64,7 @@ describe('game store', () => {
   it('saves on demand and can be reset', () => {
     const storage = memoryStorage()
     const store = createGameStore(storage, 0)
-    store.getState().actions.click(() => 0.5)
+    store.getState().actions.fire(() => 0.5)
     store.getState().actions.save({ announce: true, now: 0 })
     expect(JSON.parse(storage.data.get(SAVE_KEY) ?? '{}').clicks).toBe(1)
     expect(store.getState().notices.at(-1)?.title).toBe('Game saved')

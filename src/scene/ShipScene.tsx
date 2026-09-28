@@ -3,9 +3,11 @@ import { Canvas } from '@react-three/fiber'
 import { Bloom, EffectComposer, ToneMapping } from '@react-three/postprocessing'
 import { ToneMappingMode } from 'postprocessing'
 import { type RefObject, Suspense, useEffect, useState } from 'react'
+import { Vector3 } from 'three'
 import { warpIntensity } from '../game/engine'
 import { gameStore } from '../game/store'
 import { CAMERA_DISTANCE, CAMERA_FOV } from './constants'
+import { Mining } from './Mining'
 import { Ship } from './Ship'
 import { Starfield } from './Starfield'
 
@@ -23,12 +25,14 @@ export interface ShipSceneProps {
 }
 
 /**
- * Full-screen WebGL layer behind the UI: warp starfield, the modular 3D ship and HDR bloom.
+ * Full-screen WebGL layer behind the UI: warp starfield, the modular 3D ship, the asteroid it
+ * mines and HDR bloom.
  * Engine glow comes from emissive materials and exhaust shaders above 1.0 that bloom picks up.
  */
 export default function ShipScene({ anchor, reducedMotion, onReady }: ShipSceneProps) {
   // Lower the resolution on devices that cannot keep up, raise it again when they can.
   const [maxDpr, setMaxDpr] = useState(1.75)
+  const [bow] = useState(() => new Vector3())
   return (
     <Canvas
       flat
@@ -77,7 +81,8 @@ export default function ShipScene({ anchor, reducedMotion, onReady }: ShipSceneP
       </Environment>
 
       <Suspense fallback={null}>
-        <Ship anchor={anchor} reducedMotion={reducedMotion} />
+        <Ship anchor={anchor} bow={bow} reducedMotion={reducedMotion} />
+        <Mining anchor={anchor} bow={bow} reducedMotion={reducedMotion} />
         <Ready onReady={onReady} />
       </Suspense>
 

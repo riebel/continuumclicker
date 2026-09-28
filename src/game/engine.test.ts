@@ -2,12 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { SPEED_LEVELS, SPEED_OF_LIGHT_KMH, UPGRADES } from './content'
 import {
   advance,
+  buyLaser,
   buyUpgrade,
   canEngage,
-  click,
+  createAsteroid,
   createInitialState,
   engage,
+  expectedHitEnergy,
+  fire,
   type GameState,
+  hitEnergy,
   milestoneMultiplier,
   netRate,
   nextMilestoneAt,
@@ -83,20 +87,83 @@ describe('ship modules', () => {
   })
 })
 
-describe('clicking', () => {
-  it('adds click energy', () => {
-    const { state, gained, critical } = click(createInitialState(), () => 0.5)
+describe('mining laser', () => {
+  const noCrit = () => 0.5
+  const crit = () => 0.01
+
+  it('earns energy per hit and damages the asteroid', () => {
+    const { state, gained, critical, bonus, target } = fire(createInitialState(), noCrit)
     expect(gained).toBe(1)
     expect(critical).toBe(false)
+    expect(bonus).toBe(0)
+    expect(target.hp).toBe(3)
+    expect(state.asteroid.hp).toBe(3)
     expect(state.energy).toBe(1)
     expect(state.clicks).toBe(1)
     expect(state.lifetimeEnergy).toBe(1)
   })
 
-  it('doubles energy on a critical click', () => {
-    const { gained, critical } = click(createInitialState(), () => 0.01)
+  it('multiplies critical hits', () => {
+    const { gained, critical } = fire(createInitialState(), crit)
     expect(critical).toBe(true)
-    expect(gained).toBe(2)
+    expect(gained).toBe(3)
+  })
+
+  it('pays a break bonus and targets a new asteroid', () => {
+    let state = withState({ asteroid: { kind: 'rock', hp: 1, maxHp: 4 } })
+    const result = fire(state, noCrit)
+    expect(result.target.hp).toBe(0)
+    expect(result.bonus).toBe(4 * 0.5)
+    expect(result.state.asteroidsMined).toBe(1)
+    expect(result.state.asteroid.hp).toBeGreaterThan(0)
+    state = result.state
+    expect(state.energy).toBe(1 + 2)
+  })
+
+  it('scales hits with gross reactor output', () => {
+    const idle = withState({ owned: { ...createInitialState().owned, 'driver-coil': 10 } }) // 60 eps
+    expect(hitEnergy(idle)).toBeCloseTo(1 + 0.06 * 60)
+    const flying = { ...idle, speedLevel: SPEED_LEVELS.length - 1 }
+    expect(hitEnergy(flying)).toBe(hitEnergy(idle))
+  })
+
+  it('makes crystal asteroids worth more per hit', () => {
+    const state = withState({ asteroid: { kind: 'crystal', hp: 10, maxHp: 10 } })
+    expect(fire(state, noCrit).gained).toBe(3)
+  })
+
+  it('creates rocks with 3 to 6 hit points and rare crystals', () => {
+    expect(createAsteroid(() => 0.01)).toEqual({ kind: 'crystal', hp: 10, maxHp: 10 })
+    expect(createAsteroid(() => 0.07).hp).toBe(3)
+    expect(createAsteroid(() => 0.999).hp).toBe(6)
+  })
+
+  it('upgrades the laser with energy, up to its cap', () => {
+    const rich = withState({ energy: 1e12 })
+    const amplified = buyLaser(rich, 'laser-amplifier')
+    expect(amplified.lasers['laser-amplifier']).toBe(1)
+    expect(amplified.energy).toBe(1e12 - 50)
+    expect(hitEnergy(amplified)).toBeGreaterThan(hitEnergy(rich))
+    expect(expectedHitEnergy(amplified)).toBeGreaterThan(expectedHitEnergy(rich))
+
+    const maxed = withState({ energy: 1e12, lasers: { ...rich.lasers, 'precision-scanner': 10 } })
+    expect(buyLaser(maxed, 'precision-scanner')).toBe(maxed)
+    expect(buyLaser(withState({ energy: 10 }), 'laser-amplifier').lasers['laser-amplifier']).toBe(0)
+  })
+
+  it('averages to the simulated value over many shots', () => {
+    let state = withState({
+      lasers: { 'laser-amplifier': 3, 'precision-scanner': 4, 'crystal-resonator': 2 },
+    })
+    let seed = 1
+    const random = () => {
+      seed = (seed * 16807) % 2147483647
+      return seed / 2147483647
+    }
+    const expected = expectedHitEnergy(state)
+    const shots = 200_000
+    for (let i = 0; i < shots; i++) state = fire(state, random).state
+    expect(state.energy / shots).toBeCloseTo(expected, 0)
   })
 })
 

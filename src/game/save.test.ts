@@ -63,6 +63,33 @@ describe('save games', () => {
     expect(loaded?.state.owned['avidyne-engine']).toBe(0)
     expect(loaded?.state.owned).not.toHaveProperty('removed-upgrade')
     expect(SPEED_LEVELS[loaded?.state.speedLevel ?? -1]?.id).toBe('warp-1')
+    // Saves from before asteroid mining have no laser upgrades yet.
+    expect(loaded?.state.lasers['laser-amplifier']).toBe(0)
+    expect(loaded?.state.asteroidsMined).toBe(0)
+  })
+
+  it('restores laser upgrades, capped at their maximum level', () => {
+    const storage = memoryStorage({
+      [SAVE_KEY]: JSON.stringify({
+        version: 3,
+        savedAt: 1,
+        energy: 1,
+        distance: 1,
+        speedLevel: 'stop',
+        owned: {},
+        lasers: { 'laser-amplifier': 7, 'precision-scanner': 99 },
+        asteroidsMined: 12,
+        clicks: 0,
+        lifetimeEnergy: 0,
+      }),
+    })
+    const loaded = loadGame(storage)
+    expect(loaded?.state.lasers).toEqual({
+      'laser-amplifier': 7,
+      'precision-scanner': 10,
+      'crystal-resonator': 0,
+    })
+    expect(loaded?.state.asteroidsMined).toBe(12)
   })
 
   it('migrates a save from the 2014 version and removes the legacy keys on the next save', () => {
