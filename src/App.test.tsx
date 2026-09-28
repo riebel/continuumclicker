@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
@@ -47,6 +47,30 @@ describe('App', () => {
 
     await user.keyboard('{Enter}')
 
+    expect(gameStore.getState().game.clicks).toBe(1)
+  })
+
+  it('catches a comet', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    const now = Date.now()
+    act(() => gameStore.setState({ comet: { id: 1, appearedAt: now, leavesAt: now + 13_000 } }))
+
+    await user.click(await screen.findByRole('button', { name: /catch the comet/i }))
+
+    expect(gameStore.getState().game.cometsCaught).toBe(1)
+    expect(gameStore.getState().game.clicks).toBe(0) // The laser did not fire.
+    expect(screen.queryByRole('button', { name: /catch the comet/i })).not.toBeInTheDocument()
+  })
+
+  it('strikes a crystal vein for a critical hit', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    act(() => gameStore.setState({ vein: { id: 1, angle: 0, closesAt: Date.now() + 2500 } }))
+
+    await user.click(await screen.findByRole('button', { name: /strike the crystal vein/i }))
+
+    expect(gameStore.getState().lastShot?.critical).toBe(true)
     expect(gameStore.getState().game.clicks).toBe(1)
   })
 

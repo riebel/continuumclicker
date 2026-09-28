@@ -8,11 +8,13 @@ const REPOSITORY_URL = 'https://github.com/riebel/continuumclicker'
 function Stats() {
   const clicks = useGame((s) => s.game.clicks)
   const mined = useGame((s) => s.game.asteroidsMined)
+  const comets = useGame((s) => s.game.cometsCaught)
   const lifetime = useGame((s) => s.game.lifetimeEnergy)
   const distance = useGame((s) => s.game.distance)
   const rows = [
     ['Laser shots', formatNumber(clicks)],
     ['Asteroids mined', formatNumber(mined)],
+    ['Comets caught', formatNumber(comets)],
     ['Energy generated', formatNumber(lifetime)],
     ['Distance', `${formatNumber(distance)} km`],
     ['Deep-space distance', formatAstronomical(distance)],

@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { SPEED_LEVELS, SPEED_OF_LIGHT_KMH, UPGRADES } from './content'
+import { COMETS, SPEED_LEVELS, SPEED_OF_LIGHT_KMH, UPGRADES } from './content'
 import {
   advance,
   buyLaser,
   buyUpgrade,
   canEngage,
+  catchComet,
   createAsteroid,
   createInitialState,
   engage,
@@ -30,6 +31,11 @@ const drainOf = (id: string) => SPEED_LEVELS[levelIndex(id)]?.drain ?? Number.Na
 function withState(patch: Partial<GameState>): GameState {
   return { ...createInitialState(), ...patch }
 }
+
+const pick = ({ multiplier, duration }: { multiplier: number; duration: number }) => ({
+  multiplier,
+  duration,
+})
 
 describe('upgrades', () => {
   it('grows the cost by 15% per owned unit', () => {
@@ -201,6 +207,64 @@ describe('speed levels', () => {
   it('maps speed to a 0..1 warp intensity', () => {
     expect(warpIntensity(createInitialState())).toBe(0)
     expect(warpIntensity(withState({ speedLevel: SPEED_LEVELS.length - 1 }))).toBe(1)
+  })
+})
+
+describe('comets', () => {
+  const coils = { ...createInitialState().owned, 'driver-coil': 1 } // 3 eps
+  const overdrive = COMETS.rewards.overdrive
+  const frenzy = COMETS.rewards['laser-frenzy']
+
+  it('grants an overdrive that multiplies production until it runs out', () => {
+    const { state, reward } = catchComet(withState({ owned: coils }), () => 0)
+    expect(reward).toEqual({ kind: 'overdrive', ...pick(overdrive) })
+    expect(production(state)).toBe(3 * overdrive.multiplier)
+    expect(state.cometsCaught).toBe(1)
+
+    // Exact across the expiry: boosted for the rest of the buff, normal afterwards.
+    const { state: later } = advance(state, overdrive.duration + 10)
+    expect(later.energy).toBeCloseTo(3 * overdrive.multiplier * overdrive.duration + 3 * 10)
+    expect(later.buffs).toEqual([])
+    expect(production(later)).toBe(3)
+  })
+
+  it('refreshes a buff caught again instead of stacking it', () => {
+    let state = catchComet(withState({ owned: coils }), () => 0).state
+    state = advance(state, 20).state
+    state = catchComet(state, () => 0).state
+    expect(state.buffs).toEqual([
+      { kind: 'overdrive', ...pick(overdrive), remaining: overdrive.duration },
+    ])
+  })
+
+  it('grants a laser frenzy that multiplies hits', () => {
+    const normal = withState({})
+    const { state } = catchComet(normal, () => 0.6)
+    expect(state.buffs[0]?.kind).toBe('laser-frenzy')
+    expect(hitEnergy(state)).toBe(hitEnergy(normal) * frenzy.multiplier)
+  })
+
+  it('pays a windfall, capped by minutes of production', () => {
+    const { bankShare, productionSeconds, hits } = COMETS.rewards.windfall
+    const rich = withState({ owned: coils, energy: 1e9 })
+    const { state, reward } = catchComet(rich, () => 0.99)
+    const expected = 3 * productionSeconds + hits * hitEnergy(rich)
+    expect(reward).toEqual({ kind: 'windfall', energy: expected })
+    expect(state.energy).toBe(1e9 + expected)
+
+    const poor = withState({ owned: coils, energy: 100 })
+    expect(catchComet(poor, () => 0.99).reward).toEqual({
+      kind: 'windfall',
+      energy: 100 * bankShare + hits * hitEnergy(poor),
+    })
+  })
+})
+
+describe('crystal veins', () => {
+  it('guarantee a critical hit', () => {
+    const noCrit = () => 0.99
+    expect(fire(createInitialState(), noCrit).critical).toBe(false)
+    expect(fire(createInitialState(), noCrit, { vein: true }).critical).toBe(true)
   })
 })
 

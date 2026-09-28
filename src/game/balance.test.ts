@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { UPGRADES } from './content'
+import { expectedCometBoost } from './engine'
 import { ACTIVE, IDLE, longestWait, simulate } from './simulate'
 
 /**
@@ -62,6 +63,17 @@ describe('active play', () => {
     expect(active.maxWarpAt).not.toBeNull()
     expect(active.maxWarpAt).toBeGreaterThan(8 * HOUR)
     expect(active.maxWarpAt).toBeLessThan(18 * HOUR)
+  })
+})
+
+describe('comets', () => {
+  it('reward catching them without making them mandatory', () => {
+    // Average extra income for a player who catches every comet (windfalls not counted).
+    const boost = expectedCometBoost()
+    expect(boost.production).toBeGreaterThan(0.15)
+    expect(boost.production).toBeLessThan(0.35)
+    expect(boost.mining).toBeGreaterThan(0.2)
+    expect(boost.mining).toBeLessThan(0.45)
   })
 })
 

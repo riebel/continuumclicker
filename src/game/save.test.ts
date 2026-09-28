@@ -68,6 +68,17 @@ describe('save games', () => {
     expect(loaded?.state.asteroidsMined).toBe(0)
   })
 
+  it('keeps comet buffs running across a reload', () => {
+    const storage = memoryStorage()
+    const state = {
+      ...createInitialState(),
+      cometsCaught: 3,
+      buffs: [{ kind: 'overdrive' as const, multiplier: 3, duration: 60, remaining: 42 }],
+    }
+    saveGame(storage, state, 1000)
+    expect(loadGame(storage)?.state).toMatchObject({ cometsCaught: 3, buffs: state.buffs })
+  })
+
   it('restores laser upgrades, capped at their maximum level', () => {
     const storage = memoryStorage({
       [SAVE_KEY]: JSON.stringify({

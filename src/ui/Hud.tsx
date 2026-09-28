@@ -1,4 +1,4 @@
-import { drain, production, speedKmh, speedLevelOf } from '../game/engine'
+import { type BuffKind, drain, production, speedKmh, speedLevelOf } from '../game/engine'
 import { formatAstronomical, formatDuration, formatNumber } from '../game/format'
 import { useGame } from '../game/store'
 import { cn } from './cn'
@@ -37,7 +37,54 @@ export function EnergyReadout() {
           Reserves last {formatDuration(energy / -net)}
         </p>
       )}
+      <ActiveBuffs />
     </header>
+  )
+}
+
+const BUFF_LABELS: Record<BuffKind, { name: string; effect: string }> = {
+  overdrive: { name: 'Overdrive', effect: 'reactors' },
+  'laser-frenzy': { name: 'Laser frenzy', effect: 'hits' },
+}
+
+/** Comet buffs that are running, with their time left. */
+function ActiveBuffs() {
+  // Whole seconds, so the chips re-render once a second rather than every frame.
+  const key = useGame((s) =>
+    s.game.buffs
+      .map((b) => `${b.kind}:${b.multiplier}:${Math.ceil(b.remaining)}:${b.duration}`)
+      .join(','),
+  )
+  if (!key) return null
+  const buffs = key.split(',').map((entry) => {
+    const [kind, multiplier, remaining, duration] = entry.split(':')
+    return {
+      kind: kind as BuffKind,
+      multiplier: Number(multiplier),
+      remaining: Number(remaining),
+      duration: Number(duration),
+    }
+  })
+
+  return (
+    <ul aria-label="Active boosts" className="mt-2 flex flex-wrap justify-center gap-2">
+      {buffs.map((buff) => (
+        <li
+          key={buff.kind}
+          className="relative overflow-hidden rounded-full border border-sky-300/40 bg-sky-400/10 px-3 py-0.5 text-sm font-semibold text-sky-100"
+        >
+          <span
+            aria-hidden="true"
+            className="absolute inset-y-0 left-0 bg-sky-300/20 transition-[width] duration-1000 ease-linear"
+            style={{ width: `${(buff.remaining / buff.duration) * 100}%` }}
+          />
+          <span className="relative tabular-nums">
+            {BUFF_LABELS[buff.kind].name} · {BUFF_LABELS[buff.kind].effect} ×{buff.multiplier} ·{' '}
+            {formatDuration(buff.remaining)}
+          </span>
+        </li>
+      ))}
+    </ul>
   )
 }
 

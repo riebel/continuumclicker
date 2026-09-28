@@ -121,6 +121,39 @@ export const ASTEROIDS = {
   crystal: { chance: 0.06, hp: 10, energyMultiplier: 3 },
 } as const
 
+/**
+ * A glowing vein that now and then opens up on the asteroid. Striking it is a guaranteed
+ * critical hit, a small reward for paying attention while holding the fire button.
+ */
+export const CRYSTAL_VEIN = {
+  /** Chance per shot that a vein opens up, if none is showing. */
+  chance: 0.08,
+  /** Seconds before it closes again. */
+  lifetime: 2.5,
+} as const
+
+/**
+ * Comets cross the screen now and then while the game is open. Catching one grants a random
+ * reward. Only active players benefit, so they are tuned as a bonus on top of mining, not a
+ * necessity: `balance.test.ts` checks how much they add.
+ */
+export const COMETS = {
+  /** Seconds until the first comet after opening the game. */
+  firstAfter: [40, 80],
+  /** Seconds between one comet leaving and the next one appearing. */
+  interval: [150, 330],
+  /** Seconds a comet takes to cross the screen. */
+  lifetime: 13,
+  rewards: {
+    /** Reactors run hot: production multiplied for a while. Hits scale with it too. */
+    overdrive: { weight: 0.5, multiplier: 3, duration: 60 },
+    /** Every laser hit is worth more for a few seconds. */
+    'laser-frenzy': { weight: 0.2, multiplier: 7, duration: 15 },
+    /** An instant payout: a share of the stored energy, capped by minutes of production. */
+    windfall: { weight: 0.3, bankShare: 0.1, productionSeconds: 600, hits: 30 },
+  },
+} as const
+
 export interface LaserUpgradeDef {
   readonly id: string
   readonly name: string

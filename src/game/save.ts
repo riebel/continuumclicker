@@ -1,12 +1,13 @@
 import * as z from 'zod/mini'
 import {
+  COMETS,
   LASER_UPGRADES,
   type LaserUpgradeDef,
   SPEED_LEVELS,
   SPEED_OF_LIGHT_KMH,
   UPGRADES,
 } from './content'
-import { createInitialState, type GameState } from './engine'
+import { type Buff, createInitialState, type GameState } from './engine'
 
 export const SAVE_KEY = 'continuum-clicker:save'
 export const SAVE_VERSION = 3
@@ -29,6 +30,9 @@ const saveSchema = z.object({
   // Added with asteroid mining; older version 3 saves lack them.
   lasers: z.optional(z.record(z.string(), count)),
   asteroidsMined: z.optional(count),
+  // Added with comets.
+  buffs: z.optional(z.array(z.object({ kind: z.string(), remaining: amount }))),
+  cometsCaught: z.optional(count),
   clicks: count,
   lifetimeEnergy: amount,
 })
@@ -60,9 +64,23 @@ export function toSaveData(state: GameState, savedAt: number): SaveData {
     owned: { ...state.owned },
     lasers: { ...state.lasers },
     asteroidsMined: state.asteroidsMined,
+    buffs: state.buffs.map(({ kind, remaining }) => ({ kind, remaining })),
+    cometsCaught: state.cometsCaught,
     clicks: state.clicks,
     lifetimeEnergy: state.lifetimeEnergy,
   }
+}
+
+/** Buffs take their strength from the current content, so rebalancing applies to them too. */
+function loadBuffs(saved: SaveData['buffs']): Buff[] {
+  const buffs: Buff[] = []
+  for (const { kind, remaining } of saved ?? []) {
+    if (kind !== 'overdrive' && kind !== 'laser-frenzy') continue
+    const { multiplier, duration } = COMETS.rewards[kind]
+    if (remaining > 0)
+      buffs.push({ kind, multiplier, duration, remaining: Math.min(remaining, duration) })
+  }
+  return buffs
 }
 
 /** Only levels are persisted, so rebalanced or newly added upgrades apply to old saves. */
@@ -89,6 +107,8 @@ export function fromSaveData(data: SaveData): LoadedGame {
       owned,
       lasers,
       asteroidsMined: data.asteroidsMined ?? 0,
+      buffs: loadBuffs(data.buffs),
+      cometsCaught: data.cometsCaught ?? 0,
       clicks: data.clicks,
       lifetimeEnergy: data.lifetimeEnergy,
     },

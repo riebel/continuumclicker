@@ -20,9 +20,10 @@ import {
   Vector3,
 } from 'three'
 import type { AsteroidKind, Shot } from '../game/engine'
+import { mulberry32 } from '../game/random'
 import { gameStore } from '../game/store'
 import { ASTEROID_LAYOUT, HEADING, layoutPosition, stageBox } from './constants'
-import { createRockGeometry, createRockMaterial, crystalTransforms, mulberry32 } from './rock'
+import { createRockGeometry, createRockMaterial, crystalTransforms } from './rock'
 import { asteroidOnScreen } from './target'
 
 const CRYSTALS = 11

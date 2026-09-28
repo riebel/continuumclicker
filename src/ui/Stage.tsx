@@ -9,20 +9,22 @@ import {
 } from 'react'
 import posterUrl from '../assets/ship-poster.webp'
 import { ASTEROIDS, LASER } from '../game/content'
+import type { CometReward } from '../game/engine'
 import { formatNumber } from '../game/format'
 import { useActions, useGame } from '../game/store'
 import { asteroidOnScreen } from '../scene/target'
+import { Comet } from './Comet'
 import { cn } from './cn'
 
 export type SceneState = 'loading' | 'ready' | 'unavailable'
 
-type Tone = 'hit' | 'crit' | 'crystal' | 'bonus'
+type Tone = 'hit' | 'crit' | 'crystal' | 'bonus' | 'comet'
 
 interface Popup {
   id: number
   x: number
   y: number
-  amount: number
+  text: string
   tone: Tone
   driftX: number
   driftY: number
@@ -36,6 +38,18 @@ const TONES: Record<Tone, string> = {
   crystal: 'text-3xl font-bold text-crystal',
   crit: 'text-5xl font-black text-energy',
   bonus: 'text-4xl font-black text-energy',
+  comet: 'w-72 text-center text-2xl font-black text-sky-200 not-italic sm:text-3xl',
+}
+
+function describeReward(reward: CometReward): string {
+  switch (reward.kind) {
+    case 'overdrive':
+      return `Overdrive! Reactors ×${reward.multiplier} for ${reward.duration} s`
+    case 'laser-frenzy':
+      return `Laser frenzy! Hits ×${reward.multiplier} for ${reward.duration} s`
+    case 'windfall':
+      return `Windfall! +${formatNumber(reward.energy)}`
+  }
 }
 
 /** Where the asteroid is drawn: from the 3D scene, or a fixed spot in the stage without WebGL. */
@@ -109,6 +123,49 @@ function AsteroidStatus({
   )
 }
 
+/** A glowing crystal vein on the asteroid. Striking it is a guaranteed critical hit. */
+function CrystalVein({
+  stage,
+  onStrike,
+}: {
+  stage: RefObject<HTMLElement | null>
+  onStrike(): void
+}) {
+  const vein = useGame((s) => s.vein)
+  const box = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!vein) return
+    let frame = requestAnimationFrame(function follow() {
+      const { x, y, radius } = asteroidPosition(stage.current)
+      const dx = Math.cos(vein.angle) * radius * 0.55
+      const dy = Math.sin(vein.angle) * radius * 0.55
+      if (box.current) box.current.style.transform = `translate(${x + dx}px, ${y + dy}px)`
+      frame = requestAnimationFrame(follow)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [stage, vein])
+
+  if (!vein) return null
+  return (
+    <button
+      key={vein.id}
+      ref={box}
+      type="button"
+      aria-label="Strike the crystal vein for a critical hit"
+      onPointerDown={(event) => {
+        event.stopPropagation()
+        onStrike()
+      }}
+      onClick={(event) => event.detail === 0 && onStrike()}
+      className="fixed top-0 left-0 z-30 -mt-6 -ml-6 grid size-12 cursor-pointer touch-manipulation place-items-center"
+    >
+      <span className="absolute size-9 animate-ping rounded-full bg-crystal/40" />
+      <span className="size-4 rotate-45 bg-crystal shadow-[0_0_12px_4px_var(--color-crystal)]" />
+    </button>
+  )
+}
+
 interface StageProps {
   ref: RefObject<HTMLButtonElement | null>
   scene: SceneState
@@ -126,14 +183,17 @@ export function Stage({ ref, scene }: StageProps) {
   const nextId = useRef(0)
   const autoFire = useRef<number | undefined>(undefined)
 
-  const shoot = () => {
-    const shot = actions.fire()
+  const show = (...added: Popup[]) =>
+    setPopups((current) => [...current.slice(-MAX_POPUPS + added.length), ...added])
+
+  const shoot = (options?: { vein?: boolean }) => {
+    const shot = actions.fire(options)
     const { x, y, radius } = asteroidPosition(ref.current)
     const popup = (amount: number, tone: Tone): Popup => ({
       id: nextId.current++,
       x: x + (Math.random() - 0.5) * radius * 1.2,
       y: y - radius * 0.2,
-      amount,
+      text: `+${formatNumber(amount)}${tone === 'crit' ? '!' : ''}`,
       tone,
       driftX: (Math.random() - 0.5) * 120,
       driftY: -(110 + Math.random() * 90),
@@ -142,7 +202,22 @@ export function Stage({ ref, scene }: StageProps) {
     const tone = shot.critical ? 'crit' : shot.target.kind === 'crystal' ? 'crystal' : 'hit'
     const added = [popup(shot.gained, tone)]
     if (shot.bonus > 0) added.push({ ...popup(shot.bonus, 'bonus'), x, driftX: 0 })
-    setPopups((current) => [...current.slice(-MAX_POPUPS + added.length), ...added])
+    show(...added)
+  }
+
+  const onCometCaught = (reward: CometReward, x: number, y: number) => {
+    // Keep the message on screen even when the comet was caught at the very edge.
+    const clampedX = Math.min(Math.max(x, 150), window.innerWidth - 150)
+    show({
+      id: nextId.current++,
+      x: clampedX,
+      y,
+      text: describeReward(reward),
+      tone: 'comet',
+      driftX: 0,
+      driftY: -70,
+      duration: 2.6,
+    })
   }
 
   const stopFiring = () => {
@@ -170,7 +245,7 @@ export function Stage({ ref, scene }: StageProps) {
     }
     shoot()
     stopFiring()
-    autoFire.current = window.setInterval(shoot, 1000 / LASER.autoFireRate)
+    autoFire.current = window.setInterval(() => shoot(), 1000 / LASER.autoFireRate)
   }
 
   // Pointer shots fire on press; this only handles keyboard activation (Enter / Space).
@@ -209,7 +284,13 @@ export function Stage({ ref, scene }: StageProps) {
         )}
       </button>
 
-      {scene !== 'loading' && <AsteroidStatus stage={ref} scene={scene} />}
+      {scene !== 'loading' && (
+        <>
+          <AsteroidStatus stage={ref} scene={scene} />
+          <CrystalVein stage={ref} onStrike={() => shoot({ vein: true })} />
+        </>
+      )}
+      <Comet onCaught={onCometCaught} />
 
       <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-30 overflow-hidden">
         {popups.map((p) => (
@@ -231,8 +312,7 @@ export function Stage({ ref, scene }: StageProps) {
             transition={{ duration: p.duration, ease: 'easeOut' }}
             onAnimationComplete={() => remove(p.id)}
           >
-            +{formatNumber(p.amount)}
-            {p.tone === 'crit' && '!'}
+            {p.text}
           </m.span>
         ))}
       </div>

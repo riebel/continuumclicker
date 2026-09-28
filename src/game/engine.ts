@@ -1,5 +1,6 @@
 import {
   ASTEROIDS,
+  COMETS,
   COST_GROWTH,
   LASER,
   LASER_UPGRADES,
@@ -26,6 +27,17 @@ export interface Asteroid {
   readonly maxHp: number
 }
 
+export type BuffKind = 'overdrive' | 'laser-frenzy'
+
+/** A temporary boost from a comet. */
+export interface Buff {
+  readonly kind: BuffKind
+  readonly multiplier: number
+  /** Seconds left. */
+  readonly remaining: number
+  readonly duration: number
+}
+
 export interface GameState {
   /** Stored energy. Never negative. */
   readonly energy: number
@@ -38,6 +50,8 @@ export interface GameState {
   /** The asteroid in the mining laser's sights. Not saved: a fresh one is found on load. */
   readonly asteroid: Asteroid
   readonly asteroidsMined: number
+  readonly buffs: readonly Buff[]
+  readonly cometsCaught: number
   /** Laser shots fired. */
   readonly clicks: number
   /** All energy ever gained, from clicks and production. */
@@ -56,6 +70,8 @@ export function createInitialState(): GameState {
     >,
     asteroid: { kind: 'rock', hp: 4, maxHp: 4 },
     asteroidsMined: 0,
+    buffs: [],
+    cometsCaught: 0,
     clicks: 0,
     lifetimeEnergy: 0,
   }
@@ -99,9 +115,15 @@ export function speedKmh(state: GameState): number {
   return speedLevelOf(state).c * SPEED_OF_LIGHT_KMH
 }
 
-/** Energy produced per second by all owned upgrades. */
+/** Combined multiplier of all active buffs of one kind. */
+export function buffMultiplier(state: GameState, kind: BuffKind): number {
+  return state.buffs.reduce((product, b) => (b.kind === kind ? product * b.multiplier : product), 1)
+}
+
+/** Energy produced per second by all owned upgrades, boosted by an active overdrive. */
 export function production(state: GameState): number {
-  return UPGRADES.reduce((sum, u) => sum + upgradeProduction(u, state.owned[u.id]), 0)
+  const base = UPGRADES.reduce((sum, u) => sum + upgradeProduction(u, state.owned[u.id]), 0)
+  return base * buffMultiplier(state, 'overdrive')
 }
 
 /** Energy consumed per second by the engaged speed level. */
@@ -196,7 +218,8 @@ export function buyLaser(state: GameState, id: LaserUpgradeId): GameState {
 export function hitEnergy(state: GameState): number {
   const amplifier = state.lasers['laser-amplifier']
   const share = LASER.productionShare + 0.002 * amplifier
-  return LASER.baseEnergy * (1 + amplifier) + share * production(state)
+  const hit = LASER.baseEnergy * (1 + amplifier) + share * production(state)
+  return hit * buffMultiplier(state, 'laser-frenzy')
 }
 
 export function critChance(state: GameState): number {
@@ -248,10 +271,17 @@ export interface ShotResult extends Shot {
   readonly state: GameState
 }
 
-/** Fires the mining laser at the current asteroid. A broken asteroid is replaced right away. */
-export function fire(state: GameState, random: () => number = Math.random): ShotResult {
+/**
+ * Fires the mining laser at the current asteroid. A broken asteroid is replaced right away.
+ * Striking a crystal vein (`vein`) always crits.
+ */
+export function fire(
+  state: GameState,
+  random: () => number = Math.random,
+  { vein = false }: { vein?: boolean } = {},
+): ShotResult {
   const hit = hitEnergy(state) * kindMultiplier(state.asteroid.kind)
-  const critical = random() < critChance(state)
+  const critical = vein || random() < critChance(state)
   const gained = critical ? hit * critMultiplier(state) : hit
   const target = { ...state.asteroid, hp: state.asteroid.hp - 1 }
   const broken = target.hp <= 0
@@ -288,6 +318,29 @@ export interface AdvanceResult {
  */
 export function advance(state: GameState, seconds: number): AdvanceResult {
   let remaining = Math.max(0, Number.isFinite(seconds) ? seconds : 0)
+  let current = state
+  let downshifted = false
+
+  // Production changes whenever a buff runs out, so cruise from one expiry to the next.
+  do {
+    const step = Math.min(remaining, ...current.buffs.map((b) => b.remaining))
+    const result = cruise(current, step)
+    downshifted ||= result.downshifted
+    remaining -= step
+    current = {
+      ...result.state,
+      buffs: current.buffs
+        .map((b) => ({ ...b, remaining: b.remaining - step }))
+        .filter((b) => b.remaining > 1e-9),
+    }
+  } while (remaining > 0)
+
+  return { state: current, downshifted }
+}
+
+/** Advances by `seconds` at constant production. */
+function cruise(state: GameState, seconds: number): AdvanceResult {
+  let remaining = seconds
   let { energy, distance, speedLevel, lifetimeEnergy } = state
   let downshifted = false
   const prod = production(state)
@@ -313,6 +366,76 @@ export function advance(state: GameState, seconds: number): AdvanceResult {
   }
 
   return { state: { ...state, energy, distance, speedLevel, lifetimeEnergy }, downshifted }
+}
+
+export type CometReward =
+  | { readonly kind: BuffKind; readonly multiplier: number; readonly duration: number }
+  | { readonly kind: 'windfall'; readonly energy: number }
+
+export interface CometResult {
+  readonly state: GameState
+  readonly reward: CometReward
+}
+
+function pickReward(random: () => number): keyof typeof COMETS.rewards {
+  const entries = Object.entries(COMETS.rewards) as [
+    keyof typeof COMETS.rewards,
+    { weight: number },
+  ][]
+  const total = entries.reduce((sum, [, r]) => sum + r.weight, 0)
+  let roll = random() * total
+  for (const [kind, reward] of entries) {
+    roll -= reward.weight
+    if (roll < 0) return kind
+  }
+  return 'windfall'
+}
+
+/** Catches a comet: a random buff, or an instant windfall of energy. */
+export function catchComet(state: GameState, random: () => number = Math.random): CometResult {
+  const kind = pickReward(random)
+  const caught = { ...state, cometsCaught: state.cometsCaught + 1 }
+
+  if (kind === 'windfall') {
+    const { bankShare, productionSeconds, hits } = COMETS.rewards.windfall
+    const energy =
+      Math.min(state.energy * bankShare, production(state) * productionSeconds) +
+      hits * hitEnergy(state)
+    return {
+      reward: { kind, energy },
+      state: {
+        ...caught,
+        energy: state.energy + energy,
+        lifetimeEnergy: state.lifetimeEnergy + energy,
+      },
+    }
+  }
+
+  const { multiplier, duration } = COMETS.rewards[kind]
+  // Catching the same buff again refreshes it instead of stacking.
+  const buffs = [
+    ...state.buffs.filter((b) => b.kind !== kind),
+    { kind, multiplier, duration, remaining: duration },
+  ]
+  return { reward: { kind, multiplier, duration }, state: { ...caught, buffs } }
+}
+
+/**
+ * Average extra income from catching every comet, as a share of production and of mining
+ * income. Windfalls are left out: they depend on how much energy the player hoards.
+ */
+export function expectedCometBoost(): { production: number; mining: number } {
+  const { overdrive, 'laser-frenzy': frenzy } = COMETS.rewards
+  const weights = Object.values(COMETS.rewards).reduce((sum, r) => sum + r.weight, 0)
+  const cycle = (COMETS.interval[0] + COMETS.interval[1]) / 2 + COMETS.lifetime / 2
+  const uptime = (r: { weight: number; duration: number }) =>
+    (r.weight / weights) * (r.duration / cycle)
+  const fromOverdrive = uptime(overdrive) * (overdrive.multiplier - 1)
+  return {
+    production: fromOverdrive,
+    // Hits scale with production, so an overdrive boosts mining too.
+    mining: fromOverdrive + uptime(frenzy) * (frenzy.multiplier - 1),
+  }
 }
 
 /** 0‥1 intensity of the warp effect, used for the starfield. */
