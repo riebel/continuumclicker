@@ -283,6 +283,18 @@ export const MODULE_MIN_RING: Record<ModuleId, number> = {
   'salvage-tractor': 3,
 }
 
+/**
+ * Jumping to a new sector starts over with a fresh map, but collects dark matter from all the
+ * energy ever generated: each unit permanently boosts production (and with it every hit).
+ * The cube root makes every further unit cost more, so jumps pay off less and less often.
+ */
+export const DARK_MATTER = {
+  /** Lifetime energy for the first unit: total units = cbrt(lifetime energy / base). */
+  base: 1e9,
+  /** Production bonus per unit. */
+  bonus: 0.1,
+} as const
+
 export const VISITS = {
   /** First visit to any system: this many seconds of production, at least `minimum`. */
   firstVisitSeconds: 120,

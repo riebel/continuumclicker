@@ -59,8 +59,11 @@ export interface Simulation {
   readonly firstPurchaseAt: Partial<Record<UpgradeId, number>>
   /** Seconds until production covers the fastest speed level, or null if not reached in time. */
   readonly maxWarpAt: number | null
-  /** Income over time: production alone and including mining, sampled at every purchase. */
-  readonly income: readonly { time: number; production: number; total: number }[]
+  /**
+   * Income over time, sampled at every purchase: production alone, including mining, and all
+   * energy generated so far.
+   */
+  readonly income: readonly { time: number; production: number; total: number; lifetime: number }[]
   readonly state: GameState
 }
 
@@ -88,8 +91,12 @@ function buy(state: GameState, item: Item): GameState {
  * Plays until production covers the fastest speed level or `maxSeconds` pass. Each step it
  * buys the upgrade that pays for itself soonest, counting the wait to afford it.
  */
-export function simulate(style: Playstyle, maxSeconds: number): Simulation {
-  let state = createInitialState()
+export function simulate(
+  style: Playstyle,
+  maxSeconds: number,
+  start: GameState = createInitialState(),
+): Simulation {
+  let state = start
   let time = 0
   const purchases: Purchase[] = []
   const firstPurchaseAt: Partial<Record<UpgradeId, number>> = {}
@@ -101,7 +108,7 @@ export function simulate(style: Playstyle, maxSeconds: number): Simulation {
     const incomeOf = (s: GameState) => production(s) + shots * expectedHitEnergy(s)
     const current = incomeOf(state)
     const mining = current - produced
-    income.push({ time, production: produced, total: current })
+    income.push({ time, production: produced, total: current, lifetime: state.lifetimeEnergy })
     if (produced >= MAX_DRAIN) {
       return { purchases, firstPurchaseAt, maxWarpAt: time, income, state }
     }
@@ -119,7 +126,11 @@ export function simulate(style: Playstyle, maxSeconds: number): Simulation {
     // A hair longer than needed, so floating-point rounding never leaves it just short.
     const wait = best.wait * (1 + 1e-9) + 1e-9
     const advanced = advance(state, wait).state
-    state = { ...advanced, energy: advanced.energy + mining * wait }
+    state = {
+      ...advanced,
+      energy: advanced.energy + mining * wait,
+      lifetimeEnergy: advanced.lifetimeEnergy + mining * wait,
+    }
     time += wait
 
     const bought = buy(state, best.item)

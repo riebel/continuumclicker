@@ -2,6 +2,7 @@ import {
   ASTEROIDS,
   COMETS,
   COST_GROWTH,
+  DARK_MATTER,
   LASER,
   LASER_UPGRADES,
   type LaserUpgradeDef,
@@ -67,6 +68,10 @@ export interface GameState {
   /** Rare modules found or bought, and the ones fitted to the ship. */
   readonly modules: readonly ModuleId[]
   readonly equipped: readonly ModuleId[]
+  /** Collected by jumping to new sectors; kept forever. */
+  readonly darkMatter: number
+  /** Sector jumps made so far. */
+  readonly jumps: number
   /** Laser shots fired. */
   readonly clicks: number
   /** All energy ever gained, from clicks and production. */
@@ -103,6 +108,8 @@ export function createInitialState(sectorSeed = 1): GameState {
     visited: [HOME_ID],
     modules: [],
     equipped: [],
+    darkMatter: 0,
+    jumps: 0,
     clicks: 0,
     lifetimeEnergy: 0,
   }
@@ -155,6 +162,39 @@ export function speedKmh(state: GameState): number {
   return speedLevelOf(state).c * SPEED_OF_LIGHT_KMH
 }
 
+/** Production multiplier from dark matter. */
+export function darkMatterBonus(state: GameState): number {
+  return 1 + DARK_MATTER.bonus * state.darkMatter
+}
+
+/** Dark matter that all energy ever generated is worth in total. */
+export function darkMatterFor(lifetimeEnergy: number): number {
+  return Math.floor(Math.cbrt(Math.max(0, lifetimeEnergy) / DARK_MATTER.base))
+}
+
+/** Dark matter a sector jump would collect right now. */
+export function pendingDarkMatter(state: GameState): number {
+  return Math.max(0, darkMatterFor(state.lifetimeEnergy) - state.darkMatter)
+}
+
+/**
+ * Jumps to a new sector: everything starts over except dark matter, which grows by what is
+ * pending, and the captain's lifetime statistics.
+ */
+export function jumpSector(state: GameState, sectorSeed: number): GameState {
+  const pending = pendingDarkMatter(state)
+  if (pending <= 0) return state
+  return {
+    ...createInitialState(sectorSeed),
+    darkMatter: state.darkMatter + pending,
+    jumps: state.jumps + 1,
+    lifetimeEnergy: state.lifetimeEnergy,
+    clicks: state.clicks,
+    asteroidsMined: state.asteroidsMined,
+    cometsCaught: state.cometsCaught,
+  }
+}
+
 /** Combined multiplier of all active buffs of one kind. */
 export function buffMultiplier(state: GameState, kind: BuffKind): number {
   return state.buffs.reduce((product, b) => (b.kind === kind ? product * b.multiplier : product), 1)
@@ -163,7 +203,7 @@ export function buffMultiplier(state: GameState, kind: BuffKind): number {
 /** Energy produced per second by all owned upgrades, boosted by an active overdrive. */
 export function production(state: GameState): number {
   const base = UPGRADES.reduce((sum, u) => sum + upgradeProduction(u, state.owned[u.id]), 0)
-  return base * buffMultiplier(state, 'overdrive')
+  return base * darkMatterBonus(state) * buffMultiplier(state, 'overdrive')
 }
 
 /** Energy per second mined by drones, if they are fitted. Also runs while the player is away. */

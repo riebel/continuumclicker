@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { memoryStorage } from '../test/memoryStorage'
-import { COMETS, CRYSTAL_VEIN } from './content'
+import { COMETS, CRYSTAL_VEIN, DARK_MATTER } from './content'
 import { createInitialState } from './engine'
 import { SAVE_KEY, saveGame } from './save'
 import { createGameStore } from './store'
@@ -75,6 +75,24 @@ describe('game store', () => {
     // A fresh start also gets a fresh sector.
     const { game } = store.getState()
     expect(game).toEqual(createInitialState(game.sectorSeed))
+  })
+})
+
+describe('sector jumps', () => {
+  it('start a new sector, announce the dark matter and save right away', () => {
+    const storage = memoryStorage()
+    let roll = 0
+    const store = createGameStore(storage, Date.now(), () => (roll = (roll + 0.37) % 1))
+    const seed = store.getState().game.sectorSeed
+    store.setState((s) => ({ game: { ...s.game, lifetimeEnergy: DARK_MATTER.base * 8 } }))
+
+    store.getState().actions.jump()
+
+    const { game, notices } = store.getState()
+    expect(game).toMatchObject({ darkMatter: 2, jumps: 1, energy: 0 })
+    expect(game.sectorSeed).not.toBe(seed)
+    expect(notices.at(-1)?.title).toBe('Jumped to sector 2')
+    expect(JSON.parse(storage.data.get(SAVE_KEY) ?? '{}').darkMatter).toBe(2)
   })
 })
 

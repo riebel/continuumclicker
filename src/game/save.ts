@@ -54,6 +54,9 @@ const saveSchema = z.object({
   visited: z.optional(z.array(z.string())),
   modules: z.optional(z.array(z.string())),
   equipped: z.optional(z.array(z.string())),
+  // Added with sector jumps.
+  darkMatter: z.optional(count),
+  jumps: z.optional(count),
   clicks: count,
   lifetimeEnergy: amount,
 })
@@ -93,6 +96,8 @@ export function toSaveData(state: GameState, savedAt: number): SaveData {
     visited: [...state.visited],
     modules: [...state.modules],
     equipped: [...state.equipped],
+    darkMatter: state.darkMatter,
+    jumps: state.jumps,
     clicks: state.clicks,
     lifetimeEnergy: state.lifetimeEnergy,
   }
@@ -161,6 +166,8 @@ export function fromSaveData(data: SaveData): LoadedGame {
       buffs: loadBuffs(data.buffs),
       cometsCaught: data.cometsCaught ?? 0,
       ...loadTravel(data, initial),
+      darkMatter: data.darkMatter ?? 0,
+      jumps: data.jumps ?? 0,
       clicks: data.clicks,
       lifetimeEnergy: data.lifetimeEnergy,
     },

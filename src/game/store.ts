@@ -20,12 +20,14 @@ import {
   type CometReward,
   catchComet,
   createInitialState,
+  darkMatterBonus,
   engage,
   equip,
   fastestSustainable,
   fire,
   type GameState,
   hasModule,
+  jumpSector,
   milestoneMultiplier,
   type Shot,
   setCourse,
@@ -91,6 +93,8 @@ export interface GameStore {
     buyModule(id: ModuleId): void
     equip(id: ModuleId): void
     unequip(id: ModuleId): void
+    /** Jumps to a fresh sector, collecting the pending dark matter. */
+    jump(): void
     buy(id: UpgradeId): void
     buyLaser(id: LaserUpgradeId): void
     engage(speedLevel: number): void
@@ -249,6 +253,28 @@ export function createGameStore(
 
         unequip(id) {
           set((s) => ({ game: unequip(s.game, id) }))
+        },
+
+        jump() {
+          const time = Date.now()
+          get().actions.tick(time)
+          const before = get().game
+          const game = jumpSector(before, newSectorSeed(random))
+          if (game === before) return
+          set({
+            game,
+            notices: [],
+            lastShot: null,
+            comet: null,
+            nextCometAt: time + between(COMETS.firstAfter),
+            vein: null,
+          })
+          notify({
+            kind: 'success',
+            title: `Jumped to sector ${game.jumps + 1}`,
+            message: `${formatNumber(game.darkMatter)} dark matter now boosts production by ${formatNumber((darkMatterBonus(game) - 1) * 100)}%.`,
+          })
+          get().actions.save()
         },
 
         buy(id) {

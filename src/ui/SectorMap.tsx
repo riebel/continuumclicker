@@ -2,6 +2,7 @@ import { MapIcon, Navigation, X } from 'lucide-react'
 import { useRef, useState } from 'react'
 import {
   ASTRONOMICAL_UNIT_KM,
+  DARK_MATTER,
   LIGHT_YEAR_KM,
   MODULE_SLOTS,
   MODULES,
@@ -14,6 +15,7 @@ import {
   fastestSustainable,
   type GameState,
   isScanned,
+  pendingDarkMatter,
   position,
   production,
   travelSeconds,
@@ -315,6 +317,68 @@ function ModuleBay() {
   )
 }
 
+/** The prestige: jump to a new sector for dark matter. */
+function JumpDrive() {
+  const { jump } = useActions()
+  const [confirming, setConfirming] = useState(false)
+  const owned = useGame((s) => s.game.darkMatter)
+  const pending = useGame((s) => pendingDarkMatter(s.game))
+  const lifetime = useGame((s) => s.game.lifetimeEnergy)
+  const nextUnitAt = DARK_MATTER.base * (owned + pending + 1) ** 3
+  const bonus = (units: number) => formatNumber(DARK_MATTER.bonus * units * 100)
+
+  return (
+    <div>
+      <h3 className="mb-1 text-xs font-bold tracking-widest text-white/60 uppercase">Jump drive</h3>
+      <p className="text-sm text-white/70">
+        Dark matter: <span className="font-semibold text-crystal">{formatNumber(owned)}</span> (+
+        {bonus(owned)}% production)
+      </p>
+      <p className="mt-1 text-sm text-white/60">
+        {pending > 0
+          ? `A jump now collects ${formatNumber(pending)} dark matter: +${bonus(owned + pending)}% production in the next sector.`
+          : `Generate ${formatNumber(nextUnitAt - lifetime, { notation: 'short' })} more energy to collect the next unit.`}{' '}
+        Energy, upgrades, laser, modules and the map start over.
+      </p>
+      {confirming ? (
+        <div className="mt-2 flex gap-2">
+          <button
+            type="button"
+            onClick={() => setConfirming(false)}
+            className="flex-1 cursor-pointer rounded-lg bg-white/10 px-3 py-2 font-semibold hover:bg-white/15"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setConfirming(false)
+              jump()
+            }}
+            className="flex-1 cursor-pointer rounded-lg bg-crystal px-3 py-2 font-semibold text-space hover:bg-crystal/90"
+          >
+            Jump
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          aria-disabled={pending <= 0}
+          onClick={() => pending > 0 && setConfirming(true)}
+          className={cn(
+            'mt-2 w-full rounded-xl px-4 py-2.5 font-semibold',
+            pending > 0
+              ? 'cursor-pointer bg-crystal/20 text-crystal hover:bg-crystal/30'
+              : 'cursor-not-allowed bg-white/5 text-white/40',
+          )}
+        >
+          Jump to a new sector
+        </button>
+      )}
+    </div>
+  )
+}
+
 function SectorMap() {
   const game = useGame((s) => s.game)
   const sector = sectorFor(game.sectorSeed)
@@ -381,6 +445,7 @@ function SectorMap() {
       <div className="scrollbar-thin flex min-h-0 flex-col gap-5 overflow-y-auto pr-1">
         {selected && <Details system={selected} />}
         <ModuleBay />
+        <JumpDrive />
       </div>
     </div>
   )

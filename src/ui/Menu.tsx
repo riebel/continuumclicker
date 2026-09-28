@@ -11,12 +11,16 @@ function Stats() {
   const comets = useGame((s) => s.game.cometsCaught)
   const lifetime = useGame((s) => s.game.lifetimeEnergy)
   const distance = useGame((s) => s.game.distance)
+  const sector = useGame((s) => s.game.jumps + 1)
+  const darkMatter = useGame((s) => s.game.darkMatter)
   const rows = [
+    ['Sector', formatNumber(sector)],
+    ['Dark matter', formatNumber(darkMatter)],
     ['Laser shots', formatNumber(clicks)],
     ['Asteroids mined', formatNumber(mined)],
     ['Comets caught', formatNumber(comets)],
     ['Energy generated', formatNumber(lifetime)],
-    ['Distance', `${formatNumber(distance)} km`],
+    ['Distance in this sector', `${formatNumber(distance)} km`],
     ['Deep-space distance', formatAstronomical(distance)],
   ]
   return (
