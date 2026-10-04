@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { createPortal } from 'react-dom'
 import posterUrl from '../assets/ship-poster.webp'
 import { ASTEROIDS, LASER } from '../game/content'
 import type { Asteroid, CometReward } from '../game/engine'
@@ -332,38 +333,46 @@ export function Stage({ ref, scene }: StageProps) {
         )}
       </button>
 
-      {scene !== 'loading' && (
+      {createPortal(
         <>
-          <AsteroidStatus stage={ref} scene={scene} />
-          <CrystalVein stage={ref} onStrike={() => shoot({ vein: true })} />
-        </>
-      )}
-      <Comet onCaught={onCometCaught} />
+          {scene !== 'loading' && (
+            <>
+              <AsteroidStatus stage={ref} scene={scene} />
+              <CrystalVein stage={ref} onStrike={() => shoot({ vein: true })} />
+            </>
+          )}
+          <Comet onCaught={onCometCaught} />
 
-      <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-30 overflow-hidden">
-        {popups.map((p) => (
-          <m.span
-            key={p.id}
-            className={cn('glow absolute -translate-1/2 italic tabular-nums', TONES[p.tone])}
-            style={{ left: p.x, top: p.y }}
-            initial={{ opacity: 1, x: 0, y: 0, scale: p.tone === 'crit' ? 0.6 : 0.8 }}
-            animate={
-              reducedMotion
-                ? { opacity: 0 }
-                : {
-                    opacity: [1, 1, 0],
-                    x: p.driftX,
-                    y: p.driftY,
-                    scale: p.tone === 'crit' || p.tone === 'bonus' ? 1.25 : 1,
-                  }
-            }
-            transition={{ duration: p.duration, ease: 'easeOut' }}
-            onAnimationComplete={() => remove(p.id)}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none fixed inset-0 z-30 overflow-hidden"
           >
-            {p.text}
-          </m.span>
-        ))}
-      </div>
+            {popups.map((p) => (
+              <m.span
+                key={p.id}
+                className={cn('glow absolute -translate-1/2 italic tabular-nums', TONES[p.tone])}
+                style={{ left: p.x, top: p.y }}
+                initial={{ opacity: 1, x: 0, y: 0, scale: p.tone === 'crit' ? 0.6 : 0.8 }}
+                animate={
+                  reducedMotion
+                    ? { opacity: 0 }
+                    : {
+                        opacity: [1, 1, 0],
+                        x: p.driftX,
+                        y: p.driftY,
+                        scale: p.tone === 'crit' || p.tone === 'bonus' ? 1.25 : 1,
+                      }
+                }
+                transition={{ duration: p.duration, ease: 'easeOut' }}
+                onAnimationComplete={() => remove(p.id)}
+              >
+                {p.text}
+              </m.span>
+            ))}
+          </div>
+        </>,
+        document.body,
+      )}
     </>
   )
 }

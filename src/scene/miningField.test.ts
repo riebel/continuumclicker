@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { MiningField } from './miningField'
+import { createGameStore } from '../game/store'
+import { memoryStorage } from '../test/memoryStorage'
+import {
+  beltRate,
+  beltVisibility,
+  type FieldRock,
+  MiningField,
+  TARGET_PASS_PHASE,
+} from './miningField'
 
 const rock = { kind: 'rock' as const, hp: 4, maxHp: 4 }
 const crystal = { kind: 'crystal' as const, hp: 8, maxHp: 8 }
@@ -50,5 +58,113 @@ describe('automatic field acquisition', () => {
     expect(field.rocks.every((r) => r.enteredAt === -1 && r.flash === 0 && r.damage === 0)).toBe(
       true,
     )
+  })
+})
+
+describe('flight through the mining belt', () => {
+  it('keeps the rendered targets and retained game damage synchronized through sustained flight', () => {
+    const store = createGameStore(memoryStorage(), Date.now(), () => 0.99)
+    const field = new MiningField(0, 'rock')
+    const { actions } = store.getState()
+    let passes = 0
+    for (let frame = 0; frame < 3000; frame++) {
+      const passing = field.advance(1 / 30, 1, false, false)
+      const selected = field.prepareNext()
+      if (selected !== null) actions.prepareTarget(field.ordinal, selected)
+      if (frame % 90 === 0) {
+        const ordinal = store.getState().miningTarget
+        const shot = actions.fire()
+        const after = store.getState()
+        field.apply(
+          { ...shot, ordinal, next: after.game.asteroid, nextOrdinal: after.miningTarget },
+          frame / 30,
+        )
+      } else if (passing) {
+        actions.passTarget(field.ordinal)
+        const after = store.getState()
+        field.pass(after.miningTarget, after.game.asteroid)
+        passes++
+      }
+      const { game, pendingTargets, miningTarget } = store.getState()
+      expect(field.ordinal).toBe(miningTarget)
+      expect(field.target.kind).toBe(game.asteroid.kind)
+      expect(field.target.damage).toBeCloseTo(1 - game.asteroid.hp / game.asteroid.maxHp)
+      for (const [i, pending] of pendingTargets.entries()) {
+        if (!pending) continue
+        expect(field.rocks[i]?.kind).toBe(pending.asteroid.kind)
+        expect(field.rocks[i]?.damage).toBeCloseTo(1 - pending.asteroid.hp / pending.asteroid.maxHp)
+      }
+    }
+    expect(passes).toBeGreaterThan(10)
+    expect(passes).toBeLessThan(60)
+    expect(store.getState().game.clicks).toBe(34)
+    expect(store.getState().game.asteroidsMined).toBeGreaterThan(0)
+  })
+
+  it('plans an approaching target without moving or resetting the physical rocks', () => {
+    const field = new MiningField(0, 'rock')
+    const before = field.rocks.map((r) => ({
+      rock: r,
+      lane: r.lane,
+      phase: r.phase,
+      model: r.model,
+    }))
+    ;(field.rocks[1] as FieldRock).phase = 0.85
+    ;(field.rocks[2] as FieldRock).phase = 0.3
+    const selected = field.rocks[2]
+    expect(field.prepareNext()).toBe(2)
+    expect(field.rocks[field.slot(1)]).toBe(selected)
+    expect(field.prepareNext()).toBeNull()
+    for (const { rock, lane, model } of before) {
+      expect(rock.lane).toBe(lane)
+      expect(rock.model).toBe(model)
+    }
+    expect(field.rocks.map((r) => r.ordinal).sort()).toEqual([0, 1, 2, 3, 4])
+  })
+
+  it('streams faster with the engaged drive, with a readable upper limit', () => {
+    expect(beltRate(0)).toBe(0)
+    expect(beltRate(0.1)).toBeLessThan(beltRate(0.6))
+    expect(beltRate(0.6)).toBeLessThan(beltRate(1))
+    expect(beltRate(100)).toBe(beltRate(1))
+    expect(1 / beltRate(1)).toBeGreaterThan(13)
+    const slow = new MiningField(0, 'rock')
+    const fast = new MiningField(0, 'rock')
+    for (let i = 0; i < 20; i++) {
+      slow.advance(0.1, 0.1, false, false)
+      fast.advance(0.1, 1, false, false)
+    }
+    expect(fast.target.phase).toBeGreaterThan(slow.target.phase)
+    const before = fast.speed
+    fast.advance(0.1, 0, false, false)
+    expect(fast.speed).toBeLessThan(before)
+    expect(fast.speed).toBeGreaterThan(0)
+  })
+
+  it('allows a pass only after queued projectiles have landed, with no damage reset', () => {
+    const field = new MiningField(0, 'rock')
+    field.target.damage = 0.5
+    field.target.phase = TARGET_PASS_PHASE - 0.001
+    expect(field.advance(0.1, 1, false, true)).toBe(false)
+    expect(field.target.phase).toBeLessThanOrEqual(TARGET_PASS_PHASE)
+    expect(field.advance(0.1, 1, false, false)).toBe(true)
+    const departing = field.target
+    const model = departing.model
+    field.pass(1, crystal)
+    expect(departing.damage).toBe(0.5)
+    expect(departing.model).toBe(model)
+    expect(field.target.kind).toBe('crystal')
+    expect(field.ordinal).toBe(1)
+  })
+
+  it('keeps reduced motion stable and fades only at the distant/exit ends', () => {
+    const field = new MiningField(0, 'rock')
+    const phases = field.rocks.map((r) => r.phase)
+    for (let i = 0; i < 100; i++) expect(field.advance(0.1, 1, true, false)).toBe(false)
+    expect(field.rocks.map((r) => r.phase)).toEqual(phases)
+    expect(beltVisibility(0)).toBe(0)
+    expect(beltVisibility(1)).toBe(0)
+    expect(beltVisibility(0.01)).toBeLessThan(beltVisibility(0.04))
+    expect(beltVisibility(TARGET_PASS_PHASE)).toBe(1)
   })
 })

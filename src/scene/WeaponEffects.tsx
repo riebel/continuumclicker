@@ -63,6 +63,11 @@ export function WeaponEffects({
       sim.color.set(WEAPONS.find((w) => w.id === sim.weapon)?.color ?? '#ffffff').multiplyScalar(3)
     }
     sim.age += Math.min(delta, 0.1)
+    if (['swarm', 'plasma'].includes(sim.weapon) && sim.age <= PROJECTILE_SECONDS) {
+      sim.to.copy(target)
+      sim.dir.copy(sim.to).sub(sim.from).normalize()
+      sim.side.crossVectors(sim.dir, state.camera.up).normalize()
+    }
     const distance = sim.from.distanceTo(sim.to)
     const unit = distance * 0.12
     const t = Math.min(1, sim.age / PROJECTILE_SECONDS)

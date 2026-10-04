@@ -61,6 +61,20 @@ describe('App', () => {
     }
   })
 
+  it('anchors the target HUD to the viewport even inside a transformed, contained stage', () => {
+    const { container } = render(
+      <div style={{ transform: 'translateX(-50%)', containerType: 'size' }}>
+        <App />
+      </div>,
+    )
+    const hud = screen.getByTestId('asteroid-status')
+    expect(hud.parentElement).toBe(document.body)
+    expect(container.contains(hud)).toBe(false)
+    expect(container.contains(screen.getByRole('button', { name: /fire the mining laser/i }))).toBe(
+      true,
+    )
+  })
+
   it('collects a crystal lock from the normal firing surface without chasing a bonus target', async () => {
     const user = userEvent.setup()
     render(<App />)

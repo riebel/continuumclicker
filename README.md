@@ -113,14 +113,19 @@ stage into vertex colours. The exported `refits.glb` uses `form`, `weapon`, `wea
 and the same installation animation. The build also saves an editable Blender scene at
 `blender/build/refits.raw.blend`.
 
-Mining uses a rolling field of five targets well ahead of the bow. Destroying one acquires an
-already visible neighbour; the consumed slot refills from deeper in the belt. The fixed firing
+Mining uses five detailed Blender targets streaming against the ship's heading. Belt flow
+spools up/down with the engaged drive, with a capped rate that leaves targets readable at warp.
+Approach in depth produces perspective growth; arrivals/exits fade at the ends of each lane.
+Destroying or passing a rock acquires an approaching neighbour with time left to mine it.
+The bounded target cache retains individual HP, crystal type and unexpired crystal locks when
+acquisition order changes; a pass awards no energy or destroyed-asteroid credit. The fixed firing
 surface still supports clicking, holding and keyboard activation. Crystal locks are consumed by
 normal firing, so bonuses do not require chasing moving targets. The weapon mount follows the
-acquired target, projectile impacts follow travel time, and mineral fragments are pulled into
-the cargo intake. Tesla's chain points at the actual next target; freezing stops that target's
-drift, and singularity shots pull the surrounding field. Reduced motion keeps acquisition
-immediate and removes the moving salvage paths.
+acquired target, plasma/missiles home on moving targets and hold acquisition until impact, and
+mineral fragments are pulled into the cargo intake. Tesla's chain points at the actual next
+target and damages its retained HP. Ice stops a rock's tumble while it still passes the ship;
+singularity shots pull the surrounding field. Reduced motion removes belt streaming, keeps
+acquisition immediate and removes the moving salvage paths.
 
 `blender/build_mining.py` sculpts four reusable cratered asteroid meshes, a mineral prism and a
 rock fragment, baking mineral strata and contact shadows into vertex colours. The compressed

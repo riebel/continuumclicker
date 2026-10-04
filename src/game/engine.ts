@@ -32,6 +32,9 @@ import { distanceBetween, findSystem, HOME_ID, type StarSystem, sectorFor } from
 
 export type AsteroidKind = 'rock' | 'crystal'
 
+/** Bounded set of targets retained while the ship traverses the local mining belt. */
+export const MINING_TARGET_COUNT = 5
+
 export interface Asteroid {
   readonly kind: AsteroidKind
   /** Hits left until it breaks. */
@@ -456,7 +459,7 @@ export interface ShotResult extends Shot {
 export function fire(
   state: GameState,
   random: () => number = Math.random,
-  { vein = false }: { vein?: boolean } = {},
+  { vein = false, nextAsteroid }: { vein?: boolean; nextAsteroid?: Asteroid } = {},
 ): ShotResult {
   const hit = hitEnergy(state) * kindMultiplier(state.asteroid.kind)
   const weapon = state.activeWeapon
@@ -513,7 +516,7 @@ export function fire(
   let chained = 0
   let next = target
   if (broken) {
-    next = createAsteroid(random, crystalChance(state))
+    next = nextAsteroid ?? createAsteroid(random, crystalChance(state))
     if (weapon === 'tesla') {
       chained = Math.min(next.hp - 1, 1 + level)
       next = { ...next, hp: next.hp - chained }

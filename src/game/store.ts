@@ -16,6 +16,7 @@ import {
 } from './content'
 import {
   type Arrival,
+  type Asteroid,
   advance,
   buyLaser,
   buyModule,
@@ -23,7 +24,9 @@ import {
   buyWeapon,
   type CometReward,
   catchComet,
+  createAsteroid,
   createInitialState,
+  crystalChance,
   darkMatterBonus,
   engage,
   equip,
@@ -32,6 +35,7 @@ import {
   type GameState,
   hasModule,
   jumpSector,
+  MINING_TARGET_COUNT,
   milestoneMultiplier,
   type Shot,
   selectWeapon,
@@ -75,13 +79,24 @@ export interface Vein {
   readonly closesAt: number
 }
 
+interface PendingTarget {
+  readonly asteroid: Asteroid
+  readonly frozen: boolean
+  readonly vein: Vein | null
+}
+
 export interface GameStore {
   readonly game: GameState
   /** Epoch ms up to which the simulation has been advanced. */
   readonly lastTick: number
   readonly notices: readonly Notice[]
   /** The most recent laser shot, for effects. Not saved. */
-  readonly lastShot: (Shot & { readonly id: number }) | null
+  readonly lastShot:
+    | (Shot & { readonly id: number; readonly targetId: number; readonly nextTargetId: number })
+    | null
+  /** Acquisition cursor, independent of the number of destroyed asteroids. Not saved. */
+  readonly miningTarget: number
+  readonly pendingTargets: readonly (PendingTarget | null)[]
   /** The comet crossing the screen, if any. Comets only appear while the game is open. */
   readonly comet: Comet | null
   /** Epoch ms when the next comet appears. */
@@ -92,6 +107,10 @@ export interface GameStore {
     tick(now?: number): void
     /** Fires the mining laser; `vein` strikes the open crystal vein for a guaranteed crit. */
     fire(options?: { vein?: boolean }): Shot
+    /** Retires a target that has passed the bow; keeps its damage for later reacquisition. */
+    passTarget(expected: number): void
+    /** Chooses the next visible rock before firing, exchanging its retained target data. */
+    prepareTarget(expected: number, slot: number): void
     /** Catches the current comet. Returns its reward, or null if there is none to catch. */
     catchComet(): CometReward | null
     /** Plots a course to a system, engaging the engines if the ship is standing still. */
@@ -175,6 +194,8 @@ export function createGameStore(
       lastTick: loaded ? Math.min(loaded.savedAt, now) : now,
       notices: [],
       lastShot: null,
+      miningTarget: loaded?.state.asteroidsMined ?? 0,
+      pendingTargets: Array.from({ length: MINING_TARGET_COUNT }, () => null),
       comet: null,
       nextCometAt: now + between(COMETS.firstAfter),
       vein: null,
@@ -215,10 +236,38 @@ export function createGameStore(
           const time = Date.now()
           get().actions.tick(time)
           const struck = vein && get().vein !== null
-          const { state, ...shot } = fire(get().game, random, { vein: struck })
-          set({ game: state, lastShot: { ...shot, id: ++shotId } })
+          const before = get()
+          const nextId = before.miningTarget + 1
+          const pending = before.pendingTargets[nextId % MINING_TARGET_COUNT]
+          const { state, ...shot } = fire(before.game, random, {
+            vein: struck,
+            ...(pending && { nextAsteroid: pending.asteroid }),
+          })
+          const broken = shot.target.hp <= 0
+          const pendingTargets = [...before.pendingTargets]
+          if (broken) {
+            pendingTargets[before.miningTarget % MINING_TARGET_COUNT] = null
+            pendingTargets[nextId % MINING_TARGET_COUNT] = null
+          }
+          set({
+            game:
+              broken && pending
+                ? { ...state, frozen: state.activeWeapon === 'cryo' && pending.frozen }
+                : state,
+            miningTarget: broken ? nextId : before.miningTarget,
+            pendingTargets,
+            lastShot: {
+              ...shot,
+              id: ++shotId,
+              targetId: before.miningTarget,
+              nextTargetId: broken ? nextId : before.miningTarget,
+            },
+            ...(broken && {
+              vein: pending?.vein && pending.vein.closesAt > time ? pending.vein : null,
+            }),
+          })
           if (struck) {
-            set({ vein: null })
+            if (!broken) set({ vein: null })
           } else if (!get().vein && random() < veinChance(get().game)) {
             const id = ++eventId
             set({
@@ -230,6 +279,49 @@ export function createGameStore(
             })
           }
           return shot
+        },
+
+        passTarget(expected) {
+          const before = get()
+          // A projectile/another frame may already have advanced acquisition.
+          if (before.miningTarget !== expected) return
+          const nextId = expected + 1
+          const pendingTargets = [...before.pendingTargets]
+          const pending = pendingTargets[nextId % MINING_TARGET_COUNT]
+          pendingTargets[expected % MINING_TARGET_COUNT] = {
+            asteroid: before.game.asteroid,
+            frozen: before.game.frozen,
+            vein: before.vein,
+          }
+          pendingTargets[nextId % MINING_TARGET_COUNT] = null
+          set({
+            miningTarget: nextId,
+            pendingTargets,
+            game: {
+              ...before.game,
+              asteroid: pending?.asteroid ?? createAsteroid(random, crystalChance(before.game)),
+              frozen: before.game.activeWeapon === 'cryo' && (pending?.frozen ?? false),
+            },
+            vein: pending?.vein && pending.vein.closesAt > Date.now() ? pending.vein : null,
+          })
+        },
+
+        prepareTarget(expected, slot) {
+          const before = get()
+          if (
+            before.miningTarget !== expected ||
+            slot === expected % MINING_TARGET_COUNT ||
+            slot < 0 ||
+            slot >= MINING_TARGET_COUNT
+          )
+            return
+          const next = (expected + 1) % MINING_TARGET_COUNT
+          if (next === slot) return
+          const pendingTargets = [...before.pendingTargets]
+          const selected = pendingTargets[slot] ?? null
+          pendingTargets[slot] = pendingTargets[next] ?? null
+          pendingTargets[next] = selected
+          set({ pendingTargets })
         },
 
         catchComet() {
@@ -273,6 +365,8 @@ export function createGameStore(
             game,
             notices: [],
             lastShot: null,
+            miningTarget: 0,
+            pendingTargets: Array.from({ length: MINING_TARGET_COUNT }, () => null),
             comet: null,
             nextCometAt: time + between(COMETS.firstAfter),
             vein: null,
@@ -363,6 +457,8 @@ export function createGameStore(
             lastTick: time,
             notices: [],
             lastShot: null,
+            miningTarget: 0,
+            pendingTargets: Array.from({ length: MINING_TARGET_COUNT }, () => null),
             comet: null,
             nextCometAt: time + between(COMETS.firstAfter),
             vein: null,

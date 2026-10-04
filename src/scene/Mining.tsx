@@ -21,11 +21,18 @@ import {
 } from 'three'
 import miningUrl from '../assets/mining.glb?url'
 import { WEAPONS, type WeaponId } from '../game/content'
-import type { Shot } from '../game/engine'
+import { type Shot, warpIntensity } from '../game/engine'
 import { mulberry32 } from '../game/random'
 import { gameStore } from '../game/store'
-import { CAMERA_DISTANCE, layoutPosition, stageBox } from './constants'
-import { FIELD_SLOTS, type FieldShot, MiningField, PROJECTILE_SECONDS } from './miningField'
+import { CAMERA_DISTANCE, HEADING, layoutPosition, stageBox } from './constants'
+import {
+  beltVisibility,
+  FIELD_SLOTS,
+  type FieldRock,
+  type FieldShot,
+  MiningField,
+  PROJECTILE_SECONDS,
+} from './miningField'
 import { createRockMaterial, crystalTransforms } from './rock'
 import { asteroidOnScreen } from './target'
 import { WeaponEffects } from './WeaponEffects'
@@ -143,6 +150,12 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
     const rockMaterials = FIELD_SLOTS.map(() =>
       createRockMaterial(get('asteroid_0').material as MeshStandardMaterial),
     )
+    for (const rock of rockMaterials) rock.material.transparent = true
+    const crystalMaterials = FIELD_SLOTS.map(() => {
+      const material = (get('mineral_crystal').material as MeshStandardMaterial).clone()
+      material.transparent = true
+      return material
+    })
     const glowTexture = createGlowTexture()
     const additive = {
       toneMapped: false,
@@ -153,6 +166,7 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
     return {
       geometries: Array.from({ length: 4 }, (_, i) => geometry(`asteroid_${i}`)),
       rockMaterials,
+      crystalMaterials,
       crystalGeometry: geometry('mineral_crystal'),
       crystalMaterial: (get('mineral_crystal').material as MeshStandardMaterial).clone(),
       sparkMaterial: new MeshBasicMaterial({ color: LASER_COLOR, toneMapped: false }),
@@ -181,6 +195,7 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
     () => () => {
       for (const geometry of assets.geometries) geometry.dispose()
       for (const material of assets.rockMaterials) material.material.dispose()
+      for (const material of assets.crystalMaterials) material.dispose()
       for (const asset of Object.values(assets)) if ('dispose' in asset) asset.dispose()
       asteroidOnScreen.visible = false
     },
@@ -188,15 +203,16 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
   )
 
   const sim = useMemo(() => {
-    const { game } = gameStore.getState()
+    const { game, miningTarget } = gameStore.getState()
     return {
-      field: new MiningField(game.asteroidsMined, game.asteroid.kind),
+      field: new MiningField(miningTarget, game.asteroid.kind),
       shots: [] as (Shot & FieldShot & { arrivesAt: number })[],
       now: 0,
       asteroid: game.asteroid,
       projectileHit: new Vector3(),
       displayed: FIELD_SLOTS.map(() => -1),
       mineral: FIELD_SLOTS.map(() => false),
+      crystalModels: FIELD_SLOTS.map(() => -1),
       centers: FIELD_SLOTS.map(() => new Vector3()),
       radii: FIELD_SLOTS.map(() => 1),
       clocks: FIELD_SLOTS.map(() => 0),
@@ -217,6 +233,8 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
       pullAt: new Vector3(),
       intakeGlow: 0,
       hit: new Vector3(),
+      hitOffset: new Vector3(),
+      hitTarget: null as FieldRock | null,
       chainTarget: new Vector3(),
       dummy: new Object3D(),
       v: new Vector3(),
@@ -228,13 +246,24 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
   useEffect(
     () =>
       gameStore.subscribe((state, previous) => {
-        if (!state.lastShot && previous.lastShot) {
+        if (state.miningTarget < previous.miningTarget || (!state.lastShot && previous.lastShot)) {
           sim.shots.length = 0
-          sim.field.reset(state.game.asteroidsMined, state.game.asteroid.kind)
+          sim.field.reset(state.miningTarget, state.game.asteroid.kind)
+          sim.asteroid = state.game.asteroid
+          sim.hitTarget = null
+          sim.beamAge = sim.burstAge = Number.POSITIVE_INFINITY
+          sim.intakeGlow = 0
+          for (const pool of [sim.sparks, sim.chunks, sim.salvage])
+            for (const particle of pool) particle.alive = false
+        } else if (
+          state.miningTarget !== previous.miningTarget &&
+          state.lastShot === previous.lastShot
+        ) {
+          sim.field.pass(state.miningTarget, state.game.asteroid)
           sim.asteroid = state.game.asteroid
         }
         if (state.lastShot && state.lastShot !== previous.lastShot) {
-          const ordinal = previous.game.asteroidsMined
+          const ordinal = state.lastShot.targetId
           const slot = sim.field.slot(ordinal)
           const center = sim.centers[slot] as Vector3
           sim.v.copy(bow).sub(center).normalize()
@@ -246,9 +275,9 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
               : 0
           sim.shots.push({
             ...state.lastShot,
-            ordinal: previous.game.asteroidsMined,
+            ordinal,
             next: state.game.asteroid,
-            nextOrdinal: state.game.asteroidsMined,
+            nextOrdinal: state.lastShot.nextTargetId,
             arrivesAt: Math.max(sim.now + travel, sim.shots.at(-1)?.arrivesAt ?? 0),
           })
         }
@@ -262,34 +291,45 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
     const dt = Math.min(delta, 0.1)
     const now = state.clock.elapsedTime
     sim.now = now
-    const { game } = gameStore.getState()
+    const { game, miningTarget, actions } = gameStore.getState()
     const random = sim.random
     const box = stageBox(element.getBoundingClientRect(), state.size)
-    if (!sim.shots.length && sim.field.ordinal !== game.asteroidsMined)
-      sim.field.reset(game.asteroidsMined, game.asteroid.kind)
+    if (!sim.shots.length && sim.field.ordinal !== miningTarget)
+      sim.field.reset(miningTarget, game.asteroid.kind)
+    const passing = sim.field.advance(dt, warpIntensity(game), reducedMotion, sim.shots.length > 0)
+    if (!sim.shots.length) {
+      const selected = sim.field.prepareNext()
+      if (selected !== null) actions.prepareTarget(miningTarget, selected)
+    }
     sim.pullAge += dt
 
     const positionField = (advance: boolean) => {
-      for (const [i, spec] of FIELD_SLOTS.entries()) {
+      for (const [i] of FIELD_SLOTS.entries()) {
         const visual = sim.field.rocks[i]
+        const spec = FIELD_SLOTS[visual?.lane ?? i]
         const holder = holders.current[i]
         const mesh = rocks.current[i]
         const mineral = crystals.current[i]
         const material = assets.rockMaterials[i]
         const center = sim.centers[i]
-        if (!visual || !holder || !mesh || !material || !center) continue
+        if (!visual || !spec || !holder || !mesh || !material || !center) continue
         const active = i === sim.field.slot()
         const frozen = active && game.frozen
-        if (advance && !reducedMotion && !frozen) sim.clocks[i] = (sim.clocks[i] ?? 0) + dt
-        const clock = sim.clocks[i] ?? 0
+        if (advance && !reducedMotion && !frozen)
+          sim.clocks[visual.lane] = (sim.clocks[visual.lane] ?? 0) + dt
+        const clock = sim.clocks[visual.lane] ?? 0
         layoutPosition(box, spec, center)
-        const incoming =
-          visual.enteredAt < 0 || reducedMotion
-            ? 0
-            : Math.max(0, 1 - (now - visual.enteredAt) / 1.1)
-        center.x += box.size * (incoming ** 2 * 0.25 + Math.sin(clock * 0.16 + i * 1.7) * 0.018)
-        center.y += box.size * (incoming ** 2 * 0.3 + Math.cos(clock * 0.13 + i * 2.3) * 0.014)
-        center.z -= box.size * incoming ** 2 * 0.8
+        // Fixed world scale + approach in depth produces real perspective growth.
+        // Every lane streams opposite the same heading used by the warp starfield.
+        const phase = reducedMotion ? 0.32 : visual.phase
+        center.addScaledVector(HEADING, box.size * (0.32 - phase) * 1.9)
+        center.x += box.size * Math.sin(clock * 0.16 + visual.lane * 1.7) * 0.012
+        center.y += box.size * Math.cos(clock * 0.13 + visual.lane * 2.3) * 0.009
+        const visibility = reducedMotion ? 1 : beltVisibility(phase)
+        holder.visible = visibility > 0.001
+        material.material.opacity = visibility
+        const crystalMaterial = assets.crystalMaterials[i]
+        if (crystalMaterial) crystalMaterial.opacity = visibility
         if (sim.pullAge < 0.75 && !active && !reducedMotion) {
           const pull =
             Math.sin((sim.pullAge / 0.75) * Math.PI) *
@@ -307,21 +347,28 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
             randomUnit(random, sim.w).multiplyScalar(visual.shake * radius * 0.025),
           )
         holder.scale.setScalar(radius)
-        holder.quaternion.setFromAxisAngle(sim.axes[i] as Vector3, clock * (0.065 + i * 0.012))
-        if (sim.displayed[i] !== visual.ordinal) {
+        holder.quaternion.setFromAxisAngle(
+          sim.axes[visual.lane] as Vector3,
+          clock * (0.065 + visual.lane * 0.012),
+        )
+        if (sim.displayed[i] !== visual.model) {
           mesh.geometry = assets.geometries[
-            visual.ordinal % assets.geometries.length
+            visual.model % assets.geometries.length
           ] as Mesh['geometry']
-          sim.displayed[i] = visual.ordinal
-          material.uniforms.uSeed.value = (visual.ordinal * 1.37) % 97
+          sim.displayed[i] = visual.model
+          material.uniforms.uSeed.value = (visual.model * 1.37) % 97
         }
-        if (mineral && sim.mineral[i] !== (visual.kind === 'crystal')) {
+        if (
+          mineral &&
+          (sim.mineral[i] !== (visual.kind === 'crystal') || sim.crystalModels[i] !== visual.model)
+        ) {
           const transforms =
-            visual.kind === 'crystal' ? crystalTransforms(visual.ordinal + 1, CRYSTALS) : []
+            visual.kind === 'crystal' ? crystalTransforms(visual.model + 1, CRYSTALS) : []
           for (const [n, m] of transforms.entries()) mineral.setMatrixAt(n, m)
           mineral.count = transforms.length
           mineral.instanceMatrix.needsUpdate = true
           sim.mineral[i] = visual.kind === 'crystal'
+          sim.crystalModels[i] = visual.model
         }
         if (mineral && visual.kind !== 'crystal') mineral.count = 0
         if (advance) visual.flash = Math.max(0, visual.flash - dt * 8)
@@ -333,6 +380,15 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
       }
     }
     positionField(true)
+
+    // Homing rounds follow the moving target until impact; acquisition waits for them.
+    const flying = sim.shots.at(-1)
+    if (flying) {
+      const slot = sim.field.slot(flying.ordinal)
+      const center = sim.centers[slot] as Vector3
+      sim.v.copy(bow).sub(center).normalize()
+      sim.projectileHit.copy(center).addScaledVector(sim.v, (sim.radii[slot] ?? 1) * 0.85)
+    }
 
     const arrived: typeof sim.shots = []
     while (sim.shots[0] && sim.shots[0].arrivesAt <= now) {
@@ -352,6 +408,8 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
         .copy(center)
         .addScaledVector(sim.v, radius * 0.85)
         .add(sim.w)
+      sim.hitOffset.copy(sim.hit).sub(center)
+      sim.hitTarget = shot.target.hp > 0 ? sim.field.target : null
       sim.chainTarget.copy(sim.centers[sim.field.slot(shot.ordinal + 1)] as Vector3)
       sim.beamAge = 0
       sim.weapon = shot.weapon
@@ -382,6 +440,7 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
           randomUnit(random, p.velocity)
           if (!debris) p.velocity.addScaledVector(sim.v, 1.4).normalize()
           p.velocity.multiplyScalar(radius * (debris ? 1.2 + random() * 3 : 2 + random() * 4))
+          p.velocity.addScaledVector(HEADING, -sim.field.speed * box.size * 1.9)
           p.age = 0
           p.life = debris ? 0.9 + random() * 0.7 : 0.25 + random() * 0.3
           p.size = radius * (debris ? 0.08 + random() * 0.17 : 0.02 + random() * 0.025)
@@ -418,13 +477,20 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
       sim.field.apply(shot, now)
       sim.asteroid = shot.next
     }
-    if (!sim.shots.length) sim.asteroid = game.asteroid
+    if (passing && !sim.shots.length && sim.field.ordinal === miningTarget)
+      actions.passTarget(miningTarget)
+    if (!sim.shots.length) sim.asteroid = gameStore.getState().game.asteroid
     sim.field.target.kind = sim.asteroid.kind
     sim.field.target.damage = 1 - sim.asteroid.hp / sim.asteroid.maxHp
     positionField(false)
     sim.center.copy(sim.centers[sim.field.slot()] as Vector3)
     sim.radius = sim.radii[sim.field.slot()] ?? 1
     target.copy(sim.center)
+
+    if (sim.hitTarget) {
+      const center = sim.centers[sim.field.rocks.indexOf(sim.hitTarget)]
+      if (center) sim.hit.copy(center).add(sim.hitOffset)
+    }
 
     // Impact stays in world space even when acquisition moves to the next asteroid.
     sim.beamAge += dt
@@ -566,7 +632,7 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
             ref={(node) => {
               crystals.current[i] = node
             }}
-            args={[assets.crystalGeometry, assets.crystalMaterial, CRYSTALS]}
+            args={[assets.crystalGeometry, assets.crystalMaterials[i], CRYSTALS]}
             count={0}
             frustumCulled={false}
           />

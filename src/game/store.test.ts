@@ -94,6 +94,95 @@ describe('sector jumps', () => {
   })
 })
 
+describe('mining target handoff', () => {
+  beforeEach(() => vi.useFakeTimers({ now: 0 }))
+  afterEach(() => vi.useRealTimers())
+
+  it('retains individual target damage and crystal locks across automatic passes', () => {
+    const store = createGameStore(memoryStorage(), 0, () => 0.99)
+    store.setState((s) => ({
+      game: { ...s.game, asteroid: { kind: 'crystal', hp: 7, maxHp: 8 } },
+      vein: { id: 7, angle: 0, closesAt: 10_000 },
+    }))
+    const initial = store.getState().game
+    const { passTarget } = store.getState().actions
+    for (let i = 0; i < 5; i++) passTarget(i)
+    const after = store.getState()
+    expect(after.game.asteroid).toEqual(initial.asteroid)
+    expect(after.vein?.id).toBe(7)
+    expect(after.game.energy).toBe(initial.energy)
+    expect(after.game.clicks).toBe(0)
+    expect(after.game.asteroidsMined).toBe(0)
+    expect(after.pendingTargets).toHaveLength(5)
+    expect(after.pendingTargets.filter(Boolean)).toHaveLength(4)
+    passTarget(0) // An outdated frame cannot advance acquisition again.
+    expect(store.getState().miningTarget).toBe(5)
+  })
+
+  it('destroys the acquired target, keeps the next damaged target, and bounds the cache', () => {
+    const store = createGameStore(memoryStorage(), 0, () => 0.99)
+    const { passTarget, fire } = store.getState().actions
+    fire()
+    const damaged = store.getState().game.asteroid
+    passTarget(0)
+    for (let i = 0; i < 30 && store.getState().miningTarget < 5; i++) fire()
+    expect(store.getState().game.asteroid).toEqual(damaged)
+    expect(store.getState().lastShot).toMatchObject({ targetId: 4, nextTargetId: 5 })
+    for (let i = 0; i < 250; i++) passTarget(store.getState().miningTarget)
+    expect(store.getState().pendingTargets.filter(Boolean)).toHaveLength(4)
+    expect(store.getState().game.asteroidsMined).toBe(4)
+  })
+
+  it('clears parked targets and acquisition on reset', () => {
+    const store = createGameStore(memoryStorage(), 0, () => 0.99)
+    store.getState().actions.fire()
+    store.getState().actions.passTarget(0)
+    store.getState().actions.reset()
+    expect(store.getState().miningTarget).toBe(0)
+    expect(store.getState().pendingTargets.every((target) => target === null)).toBe(true)
+    expect(store.getState().lastShot).toBeNull()
+  })
+
+  it('keeps damage on the visible next rock when acquisition order changes', () => {
+    const store = createGameStore(memoryStorage(), 0, () => 0.99)
+    const { fire, passTarget, prepareTarget } = store.getState().actions
+    fire() // Slot zero: 3/4 HP.
+    passTarget(0)
+    fire() // Slot one: 5/6 HP.
+    const parked = store.getState().game.asteroid
+    passTarget(1)
+    // Slot two is active. Choose the already damaged rock in slot one next.
+    prepareTarget(2, 1)
+    expect(store.getState().pendingTargets[3]?.asteroid).toEqual(parked)
+    for (let i = 0; i < 6; i++) fire()
+    expect(store.getState().game.asteroid).toEqual(parked)
+    expect(store.getState().miningTarget).toBe(3)
+    expect(store.getState().pendingTargets[0]?.asteroid.hp).toBe(3)
+  })
+
+  it('applies Tesla chain damage to the retained next asteroid, including its crystal value', () => {
+    const store = createGameStore(memoryStorage(), 0, () => 0.99)
+    const { passTarget, prepareTarget, fire } = store.getState().actions
+    store.setState((s) => ({
+      game: { ...s.game, asteroid: { kind: 'crystal', hp: 3, maxHp: 10 } },
+    }))
+    passTarget(0)
+    prepareTarget(1, 0)
+    store.setState((s) => ({
+      game: {
+        ...s.game,
+        asteroid: { kind: 'rock', hp: 1, maxHp: 4 },
+        activeWeapon: 'tesla',
+        weapons: { ...s.game.weapons, tesla: 1 },
+      },
+    }))
+    const shot = fire()
+    expect(shot.chained).toBe(2)
+    expect(store.getState().game.asteroid).toEqual({ kind: 'crystal', hp: 1, maxHp: 10 })
+    expect(shot.bonus).toBe(8) // 4 × 0.5 break bonus + 2 crystal hits × 3.
+  })
+})
+
 describe('comets and crystal veins', () => {
   beforeEach(() => vi.useFakeTimers({ now: 0 }))
   afterEach(() => vi.useRealTimers())
