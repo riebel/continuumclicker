@@ -65,7 +65,7 @@ export function SpeedPanel() {
   return (
     <section
       aria-labelledby="speed-title"
-      className="panel flex min-h-0 w-full flex-col max-lg:max-h-[38dvh] lg:max-h-full"
+      className="panel flex min-h-0 w-full flex-col max-lg:max-h-[28dvh] lg:max-h-full"
     >
       <h2
         id="speed-title"

@@ -3,16 +3,19 @@ import { useMemo, useRef } from 'react'
 import { Color, type Group, type Mesh, type MeshBasicMaterial, Vector3 } from 'three'
 import { WEAPONS, type WeaponId } from '../game/content'
 import { gameStore } from '../game/store'
+import { PROJECTILE_SECONDS } from './miningField'
 
 /** Projectile paths and impact shapes give each weapon a readable visual identity. */
 export function WeaponEffects({
   bow,
   target,
+  chainTarget,
   asteroid,
   reducedMotion,
 }: {
   bow: Vector3
   target: Vector3
+  chainTarget: Vector3
   asteroid: { center: Vector3; radius: number }
   reducedMotion: boolean
 }) {
@@ -28,6 +31,8 @@ export function WeaponEffects({
       age: 10,
       weapon: 'pulse' as WeaponId,
       special: false,
+      chained: false,
+      chainTo: new Vector3(),
       missileCount: 3,
       from: new Vector3(),
       to: new Vector3(),
@@ -48,6 +53,8 @@ export function WeaponEffects({
       sim.age = 0
       sim.weapon = lastShot.weapon
       sim.special = !!lastShot.special
+      sim.chained = lastShot.chained > 0
+      sim.chainTo.copy(chainTarget)
       sim.missileCount = 2 + game.weapons.swarm
       sim.from.copy(bow)
       sim.to.copy(target)
@@ -58,8 +65,9 @@ export function WeaponEffects({
     sim.age += Math.min(delta, 0.1)
     const distance = sim.from.distanceTo(sim.to)
     const unit = distance * 0.12
-    const t = Math.min(1, sim.age / 0.3)
-    const alive = sim.age < 0.5 && !reducedMotion
+    const t = Math.min(1, sim.age / PROJECTILE_SECONDS)
+    const impactAge = sim.age - (['swarm', 'plasma'].includes(sim.weapon) ? PROJECTILE_SECONDS : 0)
+    const alive = impactAge < 0.5 && !reducedMotion
     const colorize = (mesh: Mesh) => {
       const material = mesh.material as MeshBasicMaterial
       material.color.copy(sim.color)
@@ -81,16 +89,21 @@ export function WeaponEffects({
       bolts.current.visible = alive && sim.weapon === 'tesla' && sim.age < 0.22
       bolts.current.children.forEach((object, i) => {
         const mesh = object as Mesh
+        const chain = i >= 10
+        mesh.visible = !chain || sim.chained
+        const index = i % 10
+        const from = chain ? sim.to : sim.from
+        const to = chain ? sim.chainTo : sim.to
         const jitter = (index: number) =>
           index === 0 || index === 10 ? 0 : Math.sin(index * 12.7 + sim.age * 90) * unit * 0.5
         sim.a
-          .copy(sim.from)
-          .lerp(sim.to, i / 10)
-          .addScaledVector(sim.side, jitter(i))
+          .copy(from)
+          .lerp(to, index / 10)
+          .addScaledVector(sim.side, jitter(index))
         sim.b
-          .copy(sim.from)
-          .lerp(sim.to, (i + 1) / 10)
-          .addScaledVector(sim.side, jitter(i + 1))
+          .copy(from)
+          .lerp(to, (index + 1) / 10)
+          .addScaledVector(sim.side, jitter(index + 1))
         mesh.position.copy(sim.a).add(sim.b).multiplyScalar(0.5)
         sim.v.copy(sim.b).sub(sim.a)
         mesh.scale.set(unit * 0.025, sim.v.length(), unit * 0.025)
@@ -105,15 +118,15 @@ export function WeaponEffects({
       colorize(orb.current)
     }
     if (ring.current) {
-      ring.current.visible = alive && sim.weapon !== 'pulse' && sim.age > 0.08
+      ring.current.visible = alive && sim.weapon !== 'pulse' && impactAge > 0.03
       ring.current.position.copy(sim.to)
       ring.current.quaternion.copy(state.camera.quaternion)
       const collapse = sim.weapon === 'singularity'
       ring.current.scale.setScalar(
-        unit * (collapse ? 2.5 * (1 - sim.age / 0.5) : 0.3 + sim.age * (sim.special ? 5 : 3)),
+        unit * (collapse ? 2.5 * (1 - impactAge / 0.5) : 0.3 + impactAge * (sim.special ? 5 : 3)),
       )
       const material = ring.current.material as MeshBasicMaterial
-      material.opacity = Math.max(0, 1 - sim.age / 0.5)
+      material.opacity = Math.max(0, 1 - impactAge / 0.5)
       colorize(ring.current)
     }
     if (horizon.current) {
@@ -140,7 +153,7 @@ export function WeaponEffects({
         ))}
       </group>
       <group ref={bolts} visible={false}>
-        {Array.from({ length: 10 }, (_, i) => (
+        {Array.from({ length: 20 }, (_, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: fixed lightning segments
           <mesh key={`arc-${i}`}>
             <cylinderGeometry args={[1, 1, 1, 5]} />

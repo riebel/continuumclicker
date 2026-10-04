@@ -316,6 +316,10 @@ def build(out, bake=True):
         ship.EMISSIVE.add(f'Weapon-{weapon}')
     ship.create_materials()
     collection = bpy.context.scene.collection
+    mount = bpy.data.objects.new('weapon_mount', None)
+    mount.location = v(9.3, 0, ship.SPINE.point(9.3, 0.25).z + 0.05)
+    mount['weaponMount'] = True
+    collection.objects.link(mount)
     objects, tags = [], []
     for stage in range(1, 7):
         p = Part(f'refit__{stage}', rng=random.Random(f'1701-refit-{stage}'))

@@ -9,6 +9,7 @@ import {
   MeshStandardMaterial,
   Object3D,
   type PointLight,
+  Quaternion,
   Vector3,
 } from 'three'
 import refitsUrl from '../assets/refits.glb?url'
@@ -38,6 +39,7 @@ interface PreparedShip {
   readonly bow: Object3D
   readonly modules: ModuleNode[]
   readonly muzzles: Map<string, Object3D>
+  readonly aim: Group
   readonly plumes: Plume[]
   readonly center: Vector3
   readonly radius: number
@@ -51,6 +53,15 @@ const INSTALL_MS = 900
 
 function prepare(scene: Group): PreparedShip {
   scene.updateMatrixWorld(true)
+  const aim = new Group()
+  const assemblies: Object3D[] = []
+  scene.traverse((node) => {
+    if (node.userData.weaponMount) node.getWorldPosition(aim.position)
+    if (node.userData.weapon) assemblies.push(node)
+  })
+  scene.add(aim)
+  scene.updateMatrixWorld(true)
+  for (const assembly of assemblies) aim.attach(assembly)
   const bounds = new Box3().setFromObject(scene)
   const center = bounds.getCenter(new Vector3())
   const radius = bounds.getSize(new Vector3()).length() / 2
@@ -115,6 +126,7 @@ function prepare(scene: Group): PreparedShip {
     bow,
     modules,
     muzzles,
+    aim,
     plumes,
     center,
     radius,
@@ -139,10 +151,12 @@ interface ShipProps {
   anchor: RefObject<HTMLElement | null>
   /** Receives the world position of the bow every frame. */
   bow: Vector3
+  target?: Vector3
+  collector?: Vector3
   reducedMotion: boolean
 }
 
-export function Ship({ anchor, bow, reducedMotion }: ShipProps) {
+export function Ship({ anchor, bow, target, collector, reducedMotion }: ShipProps) {
   const { scene: template } = useGLTF(shipUrl, false, true)
   const { scene: refits } = useGLTF(refitsUrl, false, true)
   // Keep the cached glTF untouched: remounts must not accumulate exhausts or bow markers.
@@ -160,7 +174,16 @@ export function Ship({ anchor, bow, reducedMotion }: ShipProps) {
   const throttle = useRef(0)
   const recoil = useRef({ shot: 0, kick: 0 })
   const mounted = useRef(false)
-  const temp = useMemo(() => ({ v: new Vector3(), sum: new Vector3(), pivot: new Vector3() }), [])
+  const temp = useMemo(
+    () => ({
+      v: new Vector3(),
+      sum: new Vector3(),
+      pivot: new Vector3(),
+      aim: new Quaternion(),
+      neutral: new Quaternion(),
+    }),
+    [],
+  )
 
   useEffect(() => () => ship.plumes.forEach(disposePlume), [ship])
 
@@ -211,8 +234,8 @@ export function Ship({ anchor, bow, reducedMotion }: ShipProps) {
     group.rotateZ(state.pointer.y * 0.04 * sway)
 
     // Engines follow the engaged speed level, spooling smoothly.
-    const target = warpIntensity(gameStore.getState().game)
-    throttle.current += (target - throttle.current) * Math.min(1, dt * 1.5)
+    const driveTarget = warpIntensity(gameStore.getState().game)
+    throttle.current += (driveTarget - throttle.current) * Math.min(1, dt * 1.5)
     const drive = { throttle: throttle.current, time, dt }
     const glow = 2 + throttle.current * 7
     for (const material of ship.engineGlow) material.emissiveIntensity = glow
@@ -254,8 +277,18 @@ export function Ship({ anchor, bow, reducedMotion }: ShipProps) {
       if (m.weapon && m.node.visible) m.node.position.x -= recoil.current.kick * 0.14
     }
     group.updateMatrixWorld(true)
+    if (target && target.lengthSq() > 0) {
+      scene.worldToLocal(temp.v.copy(target))
+      temp.v.sub(ship.aim.position).normalize()
+      temp.aim.setFromUnitVectors(temp.pivot.set(1, 0, 0), temp.v)
+      const angle = temp.aim.angleTo(temp.neutral)
+      if (angle > 1.1) temp.aim.slerp(temp.neutral, 1 - 1.1 / angle)
+      ship.aim.quaternion.slerp(temp.aim, reducedMotion ? 1 : 1 - Math.exp(-dt * 14))
+      ship.aim.updateMatrixWorld(true)
+    }
     const emitter = ship.muzzles.get(gameStore.getState().game.activeWeapon) ?? ship.bow
     emitter.getWorldPosition(bow)
+    if (collector) collector.copy(scene.localToWorld(temp.v.set(-3.8, 1, 1.5)))
   })
 
   return (

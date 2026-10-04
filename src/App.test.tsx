@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { sectorFor } from './game/sector'
 import { gameStore } from './game/store'
+import { asteroidOnScreen } from './scene/target'
 
 // jsdom has no WebGL; the 3D scene is covered by the browser checks.
 vi.mock('./scene/ShipScene', () => ({ default: () => null }))
@@ -39,6 +40,36 @@ describe('App', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('keeps the same firing surface through moving targets and multiple destructions', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    const stage = screen.getByRole('button', { name: /fire the mining laser/i })
+    try {
+      asteroidOnScreen.visible = true
+      for (let i = 0; i < 16; i++) {
+        asteroidOnScreen.x = 300 + (i % 5) * 70
+        asteroidOnScreen.y = 180 + (i % 3) * 50
+        await user.click(stage)
+        expect(screen.getByRole('button', { name: /fire the mining laser/i })).toBe(stage)
+      }
+      expect(gameStore.getState().game.clicks).toBe(16)
+      expect(gameStore.getState().game.asteroidsMined).toBeGreaterThanOrEqual(2)
+    } finally {
+      asteroidOnScreen.visible = false
+    }
+  })
+
+  it('collects a crystal lock from the normal firing surface without chasing a bonus target', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    act(() => gameStore.setState({ vein: { id: 1, angle: 2, closesAt: Date.now() + 2500 } }))
+    expect(screen.getByText('Crystal lock · next hit critical')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /fire the mining laser/i }))
+    expect(gameStore.getState().lastShot?.critical).toBe(true)
+    expect(gameStore.getState().vein).toBeNull()
+    expect(gameStore.getState().game.clicks).toBe(1)
   })
 
   it('is playable with the keyboard', async () => {

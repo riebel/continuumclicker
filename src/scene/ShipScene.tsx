@@ -33,6 +33,8 @@ export default function ShipScene({ anchor, reducedMotion, onReady }: ShipSceneP
   // Lower the resolution on devices that cannot keep up, raise it again when they can.
   const [maxDpr, setMaxDpr] = useState(1.75)
   const [bow] = useState(() => new Vector3())
+  const [target] = useState(() => new Vector3())
+  const [collector] = useState(() => new Vector3())
   return (
     <Canvas
       flat
@@ -81,8 +83,20 @@ export default function ShipScene({ anchor, reducedMotion, onReady }: ShipSceneP
       </Environment>
 
       <Suspense fallback={null}>
-        <Ship anchor={anchor} bow={bow} reducedMotion={reducedMotion} />
-        <Mining anchor={anchor} bow={bow} reducedMotion={reducedMotion} />
+        <Ship
+          anchor={anchor}
+          bow={bow}
+          target={target}
+          collector={collector}
+          reducedMotion={reducedMotion}
+        />
+        <Mining
+          anchor={anchor}
+          bow={bow}
+          target={target}
+          collector={collector}
+          reducedMotion={reducedMotion}
+        />
         <Ready onReady={onReady} />
       </Suspense>
 

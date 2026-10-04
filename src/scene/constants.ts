@@ -24,10 +24,9 @@ export const SHIP_ORIENTATION = new Quaternion().setFromRotationMatrix(
 
 /**
  * Composition inside the stage box, in multiples of the box size from its centre (x right, y up,
- * depth towards the viewer): the ship sits lower left, the asteroid it mines ahead of its nose.
+ * depth towards the viewer): the ship sits lower left; miningField.ts composes the distant belt.
  */
 export const SHIP_LAYOUT = { x: -0.1, y: -0.08, depth: 0, size: 1 }
-export const ASTEROID_LAYOUT = { x: 0.33, y: 0.3, depth: -0.2, size: 0.1 }
 
 export interface StageBox {
   /** Centre of the stage box in world units at depth 0. */

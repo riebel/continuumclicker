@@ -86,6 +86,7 @@ src/
 blender/
   build_ship.py Procedural, modular ship model → glTF
   build_refits.py Blender hull transformations and detailed weapon assemblies → glTF
+  build_mining.py Sculpted asteroid variants, crystals and fragments → glTF
   render.py     Cycles stills: PWA icons and the no-WebGL fallback poster
   run.mjs       Runs those scripts with a locally installed Blender
 ```
@@ -112,6 +113,20 @@ stage into vertex colours. The exported `refits.glb` uses `form`, `weapon`, `wea
 and the same installation animation. The build also saves an editable Blender scene at
 `blender/build/refits.raw.blend`.
 
+Mining uses a rolling field of five targets well ahead of the bow. Destroying one acquires an
+already visible neighbour; the consumed slot refills from deeper in the belt. The fixed firing
+surface still supports clicking, holding and keyboard activation. Crystal locks are consumed by
+normal firing, so bonuses do not require chasing moving targets. The weapon mount follows the
+acquired target, projectile impacts follow travel time, and mineral fragments are pulled into
+the cargo intake. Tesla's chain points at the actual next target; freezing stops that target's
+drift, and singularity shots pull the surrounding field. Reduced motion keeps acquisition
+immediate and removes the moving salvage paths.
+
+`blender/build_mining.py` sculpts four reusable cratered asteroid meshes, a mineral prism and a
+rock fragment, baking mineral strata and contact shadows into vertex colours. The compressed
+`mining.glb` is about 269 KB; no meshes are allocated on each hit. Its editable source scene is
+saved to `blender/build/mining.raw.blend`.
+
 The engines really glow: the throats are emissive geometry and the exhaust plumes are shaders
 (hot core, taper, flicker, Mach diamonds at high thrust), both brighter than 1.0 so the HDR bloom
 pass picks them up, and a point light at the engine cluster lights the hull. Thrust follows the
@@ -124,6 +139,7 @@ To change the model, edit the script and rebuild with [Blender](https://www.blen
 ```sh
 npm run model                                         # → src/assets/ship.glb (meshopt compressed)
 npm run model:refits                                  # → src/assets/refits.glb + editable .blend
+npm run model:mining                                  # → src/assets/mining.glb + editable .blend
 node blender/run.mjs render.py preview.png --tier 3   # Cycles still with modules up to tier 3
 ```
 

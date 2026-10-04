@@ -9,9 +9,9 @@ import {
 } from 'react'
 import posterUrl from '../assets/ship-poster.webp'
 import { ASTEROIDS, LASER } from '../game/content'
-import type { CometReward } from '../game/engine'
+import type { Asteroid, CometReward } from '../game/engine'
 import { formatNumber } from '../game/format'
-import { useActions, useGame } from '../game/store'
+import { gameStore, useActions, useGame } from '../game/store'
 import { asteroidOnScreen } from '../scene/target'
 import { Comet } from './Comet'
 import { cn } from './cn'
@@ -60,9 +60,9 @@ function asteroidPosition(stage: HTMLElement | null) {
   if (!rect) return { x: 0, y: 0, radius: 0 }
   const size = Math.min(rect.width, rect.height)
   return {
-    x: rect.left + rect.width / 2 + size * 0.33,
-    y: rect.top + rect.height / 2 - size * 0.3,
-    radius: size * 0.1,
+    x: rect.left + rect.width / 2 + size * 0.1,
+    y: rect.top + rect.height / 2 - size * 0.36,
+    radius: size * 0.064,
   }
 }
 
@@ -74,26 +74,53 @@ function AsteroidStatus({
   stage: RefObject<HTMLElement | null>
   scene: SceneState
 }) {
-  const { hp, maxHp, kind } = useGame((s) => s.game.asteroid)
+  const gameTarget = useGame((s) => s.game.asteroid)
+  const [visibleTarget, setVisibleTarget] = useState<Asteroid | null>(null)
+  const { hp, maxHp, kind } = scene === 'ready' && visibleTarget ? visibleTarget : gameTarget
   const box = useRef<HTMLDivElement>(null)
+  const reticle = useRef<HTMLDivElement>(null)
+  const status = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    let last = ''
     let frame = requestAnimationFrame(function follow() {
+      if (scene === 'ready' && asteroidOnScreen.visible && asteroidOnScreen.hp >= 0) {
+        const { hp, maxHp, kind } = asteroidOnScreen
+        const key = `${hp}:${maxHp}:${kind}`
+        if (key !== last) {
+          last = key
+          setVisibleTarget({ hp, maxHp, kind })
+        }
+      }
       const { x, y, radius } = asteroidPosition(stage.current)
-      if (box.current) box.current.style.transform = `translate(${x}px, ${y + radius * 1.15}px)`
+      if (box.current) box.current.style.transform = `translate(${x}px, ${y}px)`
+      if (reticle.current) {
+        reticle.current.style.width = `${radius * 2.7}px`
+        reticle.current.style.height = `${radius * 2.7}px`
+      }
+      if (status.current) status.current.style.transform = `translate(-50%, ${radius * 1.5}px)`
       frame = requestAnimationFrame(follow)
     })
     return () => cancelAnimationFrame(frame)
-  }, [stage])
+  }, [stage, scene])
 
   const crystal = kind === 'crystal'
   return (
     <div
       ref={box}
+      data-testid="asteroid-status"
       className="pointer-events-none fixed top-0 left-0 z-20 flex flex-col items-center"
       aria-hidden="true"
     >
-      <div className="flex -translate-x-1/2 flex-col items-center gap-1">
+      {scene === 'ready' && (
+        <div ref={reticle} className="absolute -translate-1/2 text-crystal/60">
+          <span className="absolute top-0 left-0 size-3 border-t border-l" />
+          <span className="absolute top-0 right-0 size-3 border-t border-r" />
+          <span className="absolute bottom-0 left-0 size-3 border-b border-l" />
+          <span className="absolute bottom-0 right-0 size-3 border-b border-r" />
+        </div>
+      )}
+      <div ref={status} className="flex flex-col items-center gap-1">
         {scene === 'unavailable' && (
           <span
             className={cn(
@@ -114,6 +141,9 @@ function AsteroidStatus({
             />
           ))}
         </span>
+        <span className="whitespace-nowrap text-[9px] font-semibold tracking-[0.2em] text-white/45 uppercase">
+          Target locked
+        </span>
         {crystal && (
           <span className="glow text-xs font-bold tracking-widest text-crystal uppercase">
             Crystal ×{ASTEROIDS.crystal.energyMultiplier}
@@ -124,7 +154,7 @@ function AsteroidStatus({
   )
 }
 
-/** A glowing crystal vein on the asteroid. Striking it is a guaranteed critical hit. */
+/** A fixed bonus control; the normal firing surface also strikes this lock automatically. */
 function CrystalVein({
   stage,
   onStrike,
@@ -138,10 +168,9 @@ function CrystalVein({
   useEffect(() => {
     if (!vein) return
     let frame = requestAnimationFrame(function follow() {
-      const { x, y, radius } = asteroidPosition(stage.current)
-      const dx = Math.cos(vein.angle) * radius * 0.55
-      const dy = Math.sin(vein.angle) * radius * 0.55
-      if (box.current) box.current.style.transform = `translate(${x + dx}px, ${y + dy}px)`
+      const rect = stage.current?.getBoundingClientRect()
+      if (box.current && rect)
+        box.current.style.transform = `translate(${rect.left + rect.width * 0.5}px, ${rect.top + rect.height * 0.83}px)`
       frame = requestAnimationFrame(follow)
     })
     return () => cancelAnimationFrame(frame)
@@ -180,6 +209,7 @@ interface StageProps {
 export function Stage({ ref, scene }: StageProps) {
   const actions = useActions()
   const reducedMotion = useReducedMotion()
+  const crystalLock = useGame((s) => s.vein !== null)
   const [popups, setPopups] = useState<Popup[]>([])
   const nextId = useRef(0)
   const autoFire = useRef<number | undefined>(undefined)
@@ -188,7 +218,7 @@ export function Stage({ ref, scene }: StageProps) {
     setPopups((current) => [...current.slice(-MAX_POPUPS + added.length), ...added])
 
   const shoot = (options?: { vein?: boolean }) => {
-    const shot = actions.fire(options)
+    const shot = actions.fire({ vein: options?.vein ?? gameStore.getState().vein !== null })
     const { x, y, radius } = asteroidPosition(ref.current)
     const popup = (amount: number, tone: Tone): Popup => ({
       id: nextId.current++,
@@ -291,6 +321,13 @@ export function Stage({ ref, scene }: StageProps) {
         {scene === 'loading' && (
           <span className="glow animate-pulse text-sm font-semibold tracking-widest text-white/50 uppercase">
             Spooling up reactors…
+          </span>
+        )}
+        {scene !== 'loading' && (
+          <span className="pointer-events-none absolute right-0 bottom-[8%] left-0 text-center text-[10px] font-semibold tracking-[0.17em] text-white/45 uppercase">
+            {crystalLock
+              ? 'Crystal lock · next hit critical'
+              : 'Auto target · click or hold to fire'}
           </span>
         )}
       </button>

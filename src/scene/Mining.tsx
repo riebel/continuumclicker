@@ -1,3 +1,4 @@
+import { useGLTF } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import { type RefObject, useEffect, useMemo, useRef } from 'react'
 import {
@@ -6,43 +7,46 @@ import {
   Color,
   CylinderGeometry,
   DynamicDrawUsage,
+  Float32BufferAttribute,
   type Group,
   type InstancedMesh,
   type Mesh,
   MeshBasicMaterial,
-  MeshStandardMaterial,
+  type MeshStandardMaterial,
   Object3D,
-  OctahedronGeometry,
   type PointLight,
   type Sprite,
   SpriteMaterial,
-  TetrahedronGeometry,
   Vector3,
 } from 'three'
+import miningUrl from '../assets/mining.glb?url'
 import { WEAPONS, type WeaponId } from '../game/content'
-import type { AsteroidKind, Shot } from '../game/engine'
+import type { Shot } from '../game/engine'
 import { mulberry32 } from '../game/random'
 import { gameStore } from '../game/store'
-import { ASTEROID_LAYOUT, HEADING, layoutPosition, stageBox } from './constants'
-import { createRockGeometry, createRockMaterial, crystalTransforms } from './rock'
+import { CAMERA_DISTANCE, layoutPosition, stageBox } from './constants'
+import { FIELD_SLOTS, type FieldShot, MiningField, PROJECTILE_SECONDS } from './miningField'
+import { createRockMaterial, crystalTransforms } from './rock'
 import { asteroidOnScreen } from './target'
 import { WeaponEffects } from './WeaponEffects'
 
 const CRYSTALS = 11
 const SPARKS = 90
 const CHUNKS = 60
-const BEAM_SECONDS = 0.1
-const SPAWN_SECONDS = 0.55
-
+const SALVAGE = 32
+const BEAM_SECONDS = 0.12
 const LASER_COLOR = new Color(6, 1.6, 0.45)
 const CRIT_COLOR = new Color(7, 5, 1.6)
 const CRYSTAL_COLOR = new Color(1.2, 4.5, 6)
+const HOT_ROCK = new Color(4, 1.3, 0.35)
 
 interface Particle {
   alive: boolean
   position: Vector3
   velocity: Vector3
   axis: Vector3
+  start: Vector3
+  control: Vector3
   spin: number
   angle: number
   age: number
@@ -56,6 +60,8 @@ function createPool(count: number): Particle[] {
     position: new Vector3(),
     velocity: new Vector3(),
     axis: new Vector3(0, 1, 0),
+    start: new Vector3(),
+    control: new Vector3(),
     spin: 0,
     angle: 0,
     age: 0,
@@ -64,13 +70,11 @@ function createPool(count: number): Particle[] {
   }))
 }
 
-function spawn(pool: Particle[]): Particle | undefined {
-  return (
-    pool.find((p) => !p.alive) ?? pool.reduce((a, b) => (a.age / a.life > b.age / b.life ? a : b))
-  )
+function spawn(pool: Particle[]): Particle {
+  return (pool.find((p) => !p.alive) ??
+    pool.reduce((a, b) => (a.age / a.life > b.age / b.life ? a : b))) as Particle
 }
 
-/** Soft radial falloff for glow sprites. */
 function createGlowTexture(): CanvasTexture {
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = 64
@@ -89,403 +93,510 @@ function createGlowTexture(): CanvasTexture {
 const randomUnit = (random: () => number, out: Vector3) =>
   out.set(random() - 0.5, random() - 0.5, random() - 0.5).normalize()
 
-interface Visual {
-  seed: number
-  kind: AsteroidKind
-  spawnedAt: number
-}
-
 interface MiningProps {
   anchor: RefObject<HTMLElement | null>
-  /** World position of the ship's bow, updated by the ship every frame. */
   bow: Vector3
+  /** Shared acquisition point for the ship's aiming rig. */
+  target: Vector3
+  collector: Vector3
   reducedMotion: boolean
 }
 
-/**
- * The asteroid in front of the ship, the mining laser and all hit effects. Reacts to shots from
- * the store; the ship itself stays calm.
- */
-export function Mining({ anchor, bow, reducedMotion }: MiningProps) {
-  const rock = useRef<Mesh>(null)
-  const holder = useRef<Group>(null)
-  const crystals = useRef<InstancedMesh>(null)
+/** Persistent distant targets; acquisition and salvage never move the player's input. */
+export function Mining({ anchor, bow, target, collector, reducedMotion }: MiningProps) {
+  const { scene: models } = useGLTF(miningUrl, false, true)
+  const holders = useRef<(Group | null)[]>([])
+  const rocks = useRef<(Mesh | null)[]>([])
+  const crystals = useRef<(InstancedMesh | null)[]>([])
   const sparksMesh = useRef<InstancedMesh>(null)
   const chunksMesh = useRef<InstancedMesh>(null)
+  const salvageMesh = useRef<InstancedMesh>(null)
+  const tethers = useRef<InstancedMesh>(null)
   const beam = useRef<Mesh>(null)
   const beamCore = useRef<Mesh>(null)
   const impact = useRef<Sprite>(null)
   const burst = useRef<Sprite>(null)
+  const intake = useRef<Sprite>(null)
   const light = useRef<PointLight>(null)
 
   const assets = useMemo(() => {
-    const rockMaterial = createRockMaterial()
+    models.updateMatrixWorld(true)
+    const get = (name: string) => {
+      const mesh = models.getObjectByName(name) as Mesh
+      if (!mesh?.isMesh) throw new Error(`Blender mining mesh missing: ${name}`)
+      return mesh
+    }
+    const geometry = (name: string) => {
+      const mesh = get(name)
+      const result = mesh.geometry.clone()
+      const source = result.getAttribute('position')
+      // Flatten glTF quantization into floating-point positions before baking node transforms.
+      const positions = new Float32Array(source.count * 3)
+      for (let i = 0; i < source.count; i++) {
+        positions[i * 3] = source.getX(i)
+        positions[i * 3 + 1] = source.getY(i)
+        positions[i * 3 + 2] = source.getZ(i)
+      }
+      result.setAttribute('position', new Float32BufferAttribute(positions, 3))
+      return result.applyMatrix4(mesh.matrixWorld)
+    }
+    const rockMaterials = FIELD_SLOTS.map(() =>
+      createRockMaterial(get('asteroid_0').material as MeshStandardMaterial),
+    )
     const glowTexture = createGlowTexture()
+    const additive = {
+      toneMapped: false,
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+    }
     return {
-      rockMaterial,
-      crystalGeometry: new OctahedronGeometry(1, 0),
-      crystalMaterial: new MeshStandardMaterial({
-        color: '#9ff4ff',
-        emissive: '#3fd8ff',
-        emissiveIntensity: 2.4,
-        roughness: 0.25,
-        metalness: 0.1,
-        flatShading: true,
-      }),
-      sparkGeometry: new OctahedronGeometry(1, 0),
+      geometries: Array.from({ length: 4 }, (_, i) => geometry(`asteroid_${i}`)),
+      rockMaterials,
+      crystalGeometry: geometry('mineral_crystal'),
+      crystalMaterial: (get('mineral_crystal').material as MeshStandardMaterial).clone(),
       sparkMaterial: new MeshBasicMaterial({ color: LASER_COLOR, toneMapped: false }),
-      chunkGeometry: new TetrahedronGeometry(1, 0),
-      chunkMaterial: new MeshStandardMaterial({
-        color: '#7d746c',
-        roughness: 0.95,
-        flatShading: true,
-      }),
+      chunkGeometry: geometry('rock_fragment'),
+      chunkMaterial: (get('rock_fragment').material as MeshStandardMaterial).clone(),
       beamGeometry: new CylinderGeometry(1, 1, 1, 10, 1, true).rotateX(Math.PI / 2),
-      beamMaterial: new MeshBasicMaterial({
-        color: LASER_COLOR,
-        toneMapped: false,
-        transparent: true,
-        blending: AdditiveBlending,
-        depthWrite: false,
-      }),
-      coreMaterial: new MeshBasicMaterial({
-        color: new Color(8, 7, 6),
-        toneMapped: false,
-        transparent: true,
-        blending: AdditiveBlending,
-        depthWrite: false,
+      beamMaterial: new MeshBasicMaterial({ ...additive, color: LASER_COLOR }),
+      coreMaterial: new MeshBasicMaterial({ ...additive, color: new Color(8, 7, 6) }),
+      tractorMaterial: new MeshBasicMaterial({
+        ...additive,
+        color: new Color(0.3, 1.6, 2.1),
+        opacity: 0.22,
       }),
       glowTexture,
-      impactMaterial: new SpriteMaterial({
-        map: glowTexture,
-        color: LASER_COLOR,
-        toneMapped: false,
-        blending: AdditiveBlending,
-        depthWrite: false,
-      }),
+      impactMaterial: new SpriteMaterial({ ...additive, map: glowTexture, color: LASER_COLOR }),
       burstMaterial: new SpriteMaterial({
+        ...additive,
         map: glowTexture,
         color: new Color(3, 1.8, 0.8),
-        toneMapped: false,
-        blending: AdditiveBlending,
-        depthWrite: false,
       }),
+      intakeMaterial: new SpriteMaterial({ ...additive, map: glowTexture, color: CRYSTAL_COLOR }),
     }
-  }, [])
+  }, [models])
 
   useEffect(
     () => () => {
-      for (const asset of Object.values(assets)) {
-        if ('dispose' in asset) asset.dispose()
-      }
-      assets.rockMaterial.material.dispose()
+      for (const geometry of assets.geometries) geometry.dispose()
+      for (const material of assets.rockMaterials) material.material.dispose()
+      for (const asset of Object.values(assets)) if ('dispose' in asset) asset.dispose()
+      asteroidOnScreen.visible = false
     },
     [assets],
   )
 
-  const sim = useMemo(
-    () => ({
-      visual: null as Visual | null,
-      shots: [] as Shot[],
+  const sim = useMemo(() => {
+    const { game } = gameStore.getState()
+    return {
+      field: new MiningField(game.asteroidsMined, game.asteroid.kind),
+      shots: [] as (Shot & FieldShot & { arrivesAt: number })[],
+      now: 0,
+      asteroid: game.asteroid,
+      projectileHit: new Vector3(),
+      displayed: FIELD_SLOTS.map(() => -1),
+      mineral: FIELD_SLOTS.map(() => false),
+      centers: FIELD_SLOTS.map(() => new Vector3()),
+      radii: FIELD_SLOTS.map(() => 1),
+      clocks: FIELD_SLOTS.map(() => 0),
+      axes: FIELD_SLOTS.map((_, i) => randomUnit(mulberry32(i + 7), new Vector3())),
       sparks: createPool(SPARKS),
       chunks: createPool(CHUNKS),
+      salvage: createPool(SALVAGE),
       random: mulberry32(1),
       center: new Vector3(),
       radius: 1,
-      shake: 0,
-      flash: 0,
-      damage: 0,
       beamAge: Number.POSITIVE_INFINITY,
       weapon: 'pulse' as WeaponId,
       beamWidth: 1,
       burstAge: Number.POSITIVE_INFINITY,
       burstSize: 1,
       burstAt: new Vector3(),
+      pullAge: 10,
+      pullAt: new Vector3(),
+      intakeGlow: 0,
       hit: new Vector3(),
-      tumbleAxis: new Vector3(0.3, 1, 0.2).normalize(),
-      tumble: 0,
+      chainTarget: new Vector3(),
       dummy: new Object3D(),
-      spot: new Vector3(),
       v: new Vector3(),
       w: new Vector3(),
       dir: new Vector3(),
-    }),
-    [],
-  )
+    }
+  }, [])
 
-  // Queue shots; they are played back in the frame loop where the bow position is known.
   useEffect(
     () =>
       gameStore.subscribe((state, previous) => {
-        if (state.lastShot && state.lastShot !== previous.lastShot) sim.shots.push(state.lastShot)
+        if (!state.lastShot && previous.lastShot) {
+          sim.shots.length = 0
+          sim.field.reset(state.game.asteroidsMined, state.game.asteroid.kind)
+          sim.asteroid = state.game.asteroid
+        }
+        if (state.lastShot && state.lastShot !== previous.lastShot) {
+          const ordinal = previous.game.asteroidsMined
+          const slot = sim.field.slot(ordinal)
+          const center = sim.centers[slot] as Vector3
+          sim.v.copy(bow).sub(center).normalize()
+          sim.projectileHit.copy(center).addScaledVector(sim.v, (sim.radii[slot] ?? 1) * 0.85)
+          sim.chainTarget.copy(sim.centers[sim.field.slot(ordinal + 1)] as Vector3)
+          const travel =
+            !reducedMotion && ['plasma', 'swarm'].includes(state.lastShot.weapon)
+              ? PROJECTILE_SECONDS
+              : 0
+          sim.shots.push({
+            ...state.lastShot,
+            ordinal: previous.game.asteroidsMined,
+            next: state.game.asteroid,
+            nextOrdinal: state.game.asteroidsMined,
+            arrivesAt: Math.max(sim.now + travel, sim.shots.at(-1)?.arrivesAt ?? 0),
+          })
+        }
       }),
-    [sim],
+    [sim, bow, reducedMotion],
   )
 
   useFrame((state, delta) => {
     const element = anchor.current
-    const mesh = rock.current
-    const group = holder.current
-    if (!element || !mesh || !group) return
+    if (!element) return
     const dt = Math.min(delta, 0.1)
     const now = state.clock.elapsedTime
+    sim.now = now
     const { game } = gameStore.getState()
     const random = sim.random
-
-    // Place the asteroid ahead of the ship.
     const box = stageBox(element.getBoundingClientRect(), state.size)
-    const spot = layoutPosition(box, ASTEROID_LAYOUT, sim.spot)
-    const baseRadius = box.size * ASTEROID_LAYOUT.size
+    if (!sim.shots.length && sim.field.ordinal !== game.asteroidsMined)
+      sim.field.reset(game.asteroidsMined, game.asteroid.kind)
+    sim.pullAge += dt
 
-    const swap = (seed: number, kind: AsteroidKind) => {
-      const old = mesh.geometry
-      mesh.geometry = createRockGeometry(seed)
-      old.dispose()
-      assets.rockMaterial.uniforms.uSeed.value = (seed % 97) * 1.37
-      assets.rockMaterial.uniforms.uCrackColor.value.copy(
-        kind === 'crystal' ? CRYSTAL_COLOR : new Color(4, 1.3, 0.35),
-      )
-      const transforms = kind === 'crystal' ? crystalTransforms(seed, CRYSTALS) : []
-      const instanced = crystals.current
-      if (instanced) {
-        for (const [i, matrix] of transforms.entries()) instanced.setMatrixAt(i, matrix)
-        instanced.count = transforms.length
-        instanced.instanceMatrix.needsUpdate = true
+    const positionField = (advance: boolean) => {
+      for (const [i, spec] of FIELD_SLOTS.entries()) {
+        const visual = sim.field.rocks[i]
+        const holder = holders.current[i]
+        const mesh = rocks.current[i]
+        const mineral = crystals.current[i]
+        const material = assets.rockMaterials[i]
+        const center = sim.centers[i]
+        if (!visual || !holder || !mesh || !material || !center) continue
+        const active = i === sim.field.slot()
+        const frozen = active && game.frozen
+        if (advance && !reducedMotion && !frozen) sim.clocks[i] = (sim.clocks[i] ?? 0) + dt
+        const clock = sim.clocks[i] ?? 0
+        layoutPosition(box, spec, center)
+        const incoming =
+          visual.enteredAt < 0 || reducedMotion
+            ? 0
+            : Math.max(0, 1 - (now - visual.enteredAt) / 1.1)
+        center.x += box.size * (incoming ** 2 * 0.25 + Math.sin(clock * 0.16 + i * 1.7) * 0.018)
+        center.y += box.size * (incoming ** 2 * 0.3 + Math.cos(clock * 0.13 + i * 2.3) * 0.014)
+        center.z -= box.size * incoming ** 2 * 0.8
+        if (sim.pullAge < 0.75 && !active && !reducedMotion) {
+          const pull =
+            Math.sin((sim.pullAge / 0.75) * Math.PI) *
+            0.3 *
+            Math.exp(-center.distanceTo(sim.pullAt) / box.size)
+          center.lerp(sim.pullAt, pull)
+        }
+        const perspective = (CAMERA_DISTANCE - spec.depth * box.size) / CAMERA_DISTANCE
+        const radius = box.size * spec.size * perspective * (visual.kind === 'crystal' ? 1.12 : 1)
+        sim.radii[i] = radius
+        holder.position.copy(center)
+        if (advance) visual.shake = Math.max(0, visual.shake - dt * 7)
+        if (!reducedMotion && visual.shake)
+          holder.position.add(
+            randomUnit(random, sim.w).multiplyScalar(visual.shake * radius * 0.025),
+          )
+        holder.scale.setScalar(radius)
+        holder.quaternion.setFromAxisAngle(sim.axes[i] as Vector3, clock * (0.065 + i * 0.012))
+        if (sim.displayed[i] !== visual.ordinal) {
+          mesh.geometry = assets.geometries[
+            visual.ordinal % assets.geometries.length
+          ] as Mesh['geometry']
+          sim.displayed[i] = visual.ordinal
+          material.uniforms.uSeed.value = (visual.ordinal * 1.37) % 97
+        }
+        if (mineral && sim.mineral[i] !== (visual.kind === 'crystal')) {
+          const transforms =
+            visual.kind === 'crystal' ? crystalTransforms(visual.ordinal + 1, CRYSTALS) : []
+          for (const [n, m] of transforms.entries()) mineral.setMatrixAt(n, m)
+          mineral.count = transforms.length
+          mineral.instanceMatrix.needsUpdate = true
+          sim.mineral[i] = visual.kind === 'crystal'
+        }
+        if (mineral && visual.kind !== 'crystal') mineral.count = 0
+        if (advance) visual.flash = Math.max(0, visual.flash - dt * 8)
+        material.uniforms.uDamage.value = visual.damage
+        material.uniforms.uFlash.value = visual.flash * 0.22
+        material.uniforms.uCrackColor.value.copy(
+          frozen || visual.kind === 'crystal' ? CRYSTAL_COLOR : HOT_ROCK,
+        )
       }
-      randomUnit(mulberry32(seed), sim.tumbleAxis)
-      sim.visual = { seed, kind, spawnedAt: now }
-      sim.damage = 0
     }
+    positionField(true)
 
-    const seed = game.asteroidsMined + 1
-    if (!sim.visual) {
-      swap(seed, game.asteroid.kind)
-      sim.visual = { seed, kind: game.asteroid.kind, spawnedAt: -1 }
+    const arrived: typeof sim.shots = []
+    while (sim.shots[0] && sim.shots[0].arrivesAt <= now) {
+      const shot = sim.shots.shift()
+      if (shot) arrived.push(shot)
     }
-
-    // Play back queued shots.
-    for (const shot of sim.shots.splice(0)) {
-      const kind = sim.visual.kind
-      sim.v.copy(bow).sub(sim.center).normalize()
+    for (const shot of arrived) {
+      if (sim.field.ordinal !== shot.ordinal) sim.field.reset(shot.ordinal, shot.target.kind)
+      const slot = sim.field.slot(shot.ordinal)
+      const center = sim.centers[slot] as Vector3
+      const radius = sim.radii[slot] ?? 1
+      sim.v.copy(bow).sub(center).normalize()
       randomUnit(random, sim.w)
         .cross(sim.v)
-        .multiplyScalar(sim.radius * 0.35 * random())
+        .multiplyScalar(radius * 0.25 * random())
       sim.hit
-        .copy(sim.center)
-        .addScaledVector(sim.v, sim.radius * 0.8)
+        .copy(center)
+        .addScaledVector(sim.v, radius * 0.85)
         .add(sim.w)
+      sim.chainTarget.copy(sim.centers[sim.field.slot(shot.ordinal + 1)] as Vector3)
       sim.beamAge = 0
       sim.weapon = shot.weapon
       sim.beamWidth =
         shot.weapon === 'railgun'
-          ? 0.45
+          ? 0.4
           : shot.weapon === 'singularity'
-            ? 2
-            : shot.weapon === 'cryo'
-              ? 1.4
-              : shot.special
-                ? 1.8
-                : 1
+            ? 1.7
+            : shot.special
+              ? 1.3
+              : 1
       const color =
         shot.weapon !== 'pulse'
           ? new Color(WEAPONS.find((w) => w.id === shot.weapon)?.color).multiplyScalar(3)
           : shot.critical
             ? CRIT_COLOR
-            : kind === 'crystal'
+            : shot.target.kind === 'crystal'
               ? CRYSTAL_COLOR
               : LASER_COLOR
       assets.beamMaterial.color.copy(color)
       assets.impactMaterial.color.copy(color)
       assets.sparkMaterial.color.copy(color)
-      sim.flash = Math.max(sim.flash, shot.critical ? 1 : 0.55)
-      sim.shake = Math.min(2, sim.shake + (shot.critical ? 1.6 : 0.8))
-
-      const sparkCount = reducedMotion ? 3 : shot.critical ? 18 : 9
-      for (let i = 0; i < sparkCount; i++) {
-        const p = spawn(sim.sparks)
-        if (!p) break
-        p.alive = true
-        p.position.copy(sim.hit)
-        randomUnit(random, p.velocity)
-          .addScaledVector(sim.v, 1.4)
-          .normalize()
-          .multiplyScalar(sim.radius * (2 + random() * 4))
-        p.age = 0
-        p.life = 0.25 + random() * 0.35
-        p.size = sim.radius * (0.025 + random() * 0.03)
-        randomUnit(random, p.axis)
-        p.spin = 10
-        p.angle = random() * 6
-      }
-
-      if (shot.target.hp <= 0) {
-        // Break apart: chunks fly out, a flash, and the next asteroid drifts in.
-        const chunkCount = reducedMotion ? 6 : 26
-        for (let i = 0; i < chunkCount; i++) {
-          const p = spawn(sim.chunks)
-          if (!p) break
+      const emit = (pool: Particle[], count: number, debris: boolean) => {
+        for (let i = 0; i < count; i++) {
+          const p = spawn(pool)
           p.alive = true
-          randomUnit(random, sim.w)
-          p.position.copy(sim.center).addScaledVector(sim.w, sim.radius * 0.5 * random())
-          p.velocity.copy(sim.w).multiplyScalar(sim.radius * (1.2 + random() * 3))
+          p.position.copy(debris ? center : sim.hit)
+          randomUnit(random, p.velocity)
+          if (!debris) p.velocity.addScaledVector(sim.v, 1.4).normalize()
+          p.velocity.multiplyScalar(radius * (debris ? 1.2 + random() * 3 : 2 + random() * 4))
           p.age = 0
-          p.life = 0.8 + random() * 0.8
-          p.size = sim.radius * (0.1 + random() * 0.22)
+          p.life = debris ? 0.9 + random() * 0.7 : 0.25 + random() * 0.3
+          p.size = radius * (debris ? 0.08 + random() * 0.17 : 0.02 + random() * 0.025)
           randomUnit(random, p.axis)
-          p.spin = 2 + random() * 6
+          p.spin = debris ? 2 + random() * 5 : 10
           p.angle = random() * 6
         }
-        sim.burstAge = 0
-        sim.burstSize = sim.radius
-        sim.burstAt.copy(sim.center)
-        swap(seed, game.asteroid.kind)
       }
+      emit(sim.sparks, reducedMotion ? 3 : shot.critical ? 18 : 9, false)
+      if (shot.target.hp <= 0) {
+        emit(sim.chunks, reducedMotion ? 4 : 22, true)
+        if (!reducedMotion)
+          for (let i = 0; i < (shot.target.kind === 'crystal' ? 8 : 4); i++) {
+            const p = spawn(sim.salvage)
+            p.alive = true
+            p.age = 0
+            p.life = 0.85 + random() * 0.45
+            p.size = radius * (0.075 + random() * 0.07)
+            p.start.copy(center).add(randomUnit(random, sim.w).multiplyScalar(radius * 0.35))
+            p.control.copy(p.start).add(randomUnit(random, sim.w).multiplyScalar(radius * 2.3))
+            p.position.copy(p.start)
+            randomUnit(random, p.axis)
+            p.angle = random() * 6
+            p.spin = 3
+          }
+        sim.burstAge = 0
+        sim.burstSize = radius
+        sim.burstAt.copy(center)
+      }
+      if (shot.weapon === 'singularity' && shot.special) {
+        sim.pullAge = 0
+        sim.pullAt.copy(center)
+      }
+      sim.field.apply(shot, now)
+      sim.asteroid = shot.next
     }
-    // Reset or a loaded game: follow the store without an explosion.
-    if (sim.visual.seed !== seed) swap(seed, game.asteroid.kind)
+    if (!sim.shots.length) sim.asteroid = game.asteroid
+    sim.field.target.kind = sim.asteroid.kind
+    sim.field.target.damage = 1 - sim.asteroid.hp / sim.asteroid.maxHp
+    positionField(false)
+    sim.center.copy(sim.centers[sim.field.slot()] as Vector3)
+    sim.radius = sim.radii[sim.field.slot()] ?? 1
+    target.copy(sim.center)
 
-    // Asteroid: drift in, tumble, shake, glow.
-    const visual = sim.visual
-    const t = visual.spawnedAt < 0 ? 1 : Math.min(1, (now - visual.spawnedAt) / SPAWN_SECONDS)
-    const arrive = reducedMotion ? 1 : 1 - (1 - t) ** 3
-    sim.radius = baseRadius * (visual.kind === 'crystal' ? 1.2 : 1)
-    sim.center.copy(spot).addScaledVector(HEADING, (1 - arrive) * box.size * 0.6)
-    sim.shake = Math.max(0, sim.shake - dt * 7)
-    group.position.copy(sim.center)
-    if (!reducedMotion && sim.shake > 0) {
-      group.position.add(randomUnit(random, sim.w).multiplyScalar(sim.shake * sim.radius * 0.035))
-    }
-    group.scale.setScalar(sim.radius * Math.max(0.01, arrive))
-    sim.tumble += dt * (reducedMotion ? 0 : 0.18)
-    group.quaternion.setFromAxisAngle(sim.tumbleAxis, sim.tumble)
-
-    const targetDamage = 1 - game.asteroid.hp / game.asteroid.maxHp
-    sim.damage += (targetDamage - sim.damage) * Math.min(1, dt * 12)
-    sim.flash = Math.max(0, sim.flash - dt * 10)
-    assets.rockMaterial.uniforms.uDamage.value = sim.damage
-    assets.rockMaterial.uniforms.uCrackColor.value.copy(
-      game.frozen
-        ? CRYSTAL_COLOR
-        : game.asteroid.kind === 'crystal'
-          ? CRYSTAL_COLOR
-          : new Color(4, 1.3, 0.35),
-    )
-    assets.rockMaterial.uniforms.uFlash.value = sim.flash * 0.25
-    assets.crystalMaterial.emissiveIntensity = 2.4 + sim.flash * 4 + Math.sin(now * 3) * 0.4
-
-    // Laser beam from the bow to the hit point.
+    // Impact stays in world space even when acquisition moves to the next asteroid.
     sim.beamAge += dt
-    const beamOn =
-      sim.beamAge < BEAM_SECONDS &&
-      sim.weapon !== 'swarm' &&
-      sim.weapon !== 'plasma' &&
-      sim.weapon !== 'tesla'
+    const beamOn = sim.beamAge < BEAM_SECONDS && !['swarm', 'plasma', 'tesla'].includes(sim.weapon)
     for (const [ref, width] of [
-      [beam, 0.03],
-      [beamCore, 0.01],
+      [beam, 0.0035],
+      [beamCore, 0.0012],
     ] as const) {
-      const m = ref.current
-      if (!m) continue
-      m.visible = beamOn
+      const mesh = ref.current
+      if (!mesh) continue
+      mesh.visible = beamOn
       if (!beamOn) continue
-      const fade = 1 - sim.beamAge / BEAM_SECONDS
       sim.w.copy(sim.hit).sub(bow)
-      m.position.copy(bow).addScaledVector(sim.w, 0.5)
-      m.quaternion.setFromUnitVectors(sim.v.set(0, 0, 1), sim.dir.copy(sim.w).normalize())
-      const w = box.size * width * sim.beamWidth * (0.4 + 0.6 * fade)
-      m.scale.set(w, w, sim.w.length())
+      mesh.position.copy(bow).addScaledVector(sim.w, 0.5)
+      mesh.quaternion.setFromUnitVectors(sim.v.set(0, 0, 1), sim.dir.copy(sim.w).normalize())
+      const w = box.size * width * sim.beamWidth * (1 - (sim.beamAge / BEAM_SECONDS) * 0.6)
+      mesh.scale.set(w, w, sim.w.length())
     }
-    assets.beamMaterial.opacity = assets.coreMaterial.opacity = 1 - sim.beamAge / BEAM_SECONDS
-
+    assets.beamMaterial.opacity = assets.coreMaterial.opacity = Math.max(
+      0,
+      1 - sim.beamAge / BEAM_SECONDS,
+    )
     if (impact.current) {
-      const glow = Math.max(0, 1 - sim.beamAge / (BEAM_SECONDS * 2))
+      const glow = Math.max(0, 1 - sim.beamAge / 0.2)
       impact.current.visible = glow > 0
       impact.current.position.copy(sim.hit)
-      impact.current.scale.setScalar(sim.radius * (0.6 + 0.9 * glow))
+      impact.current.scale.setScalar(sim.radius * (0.5 + glow))
       assets.impactMaterial.opacity = glow
     }
     if (light.current) {
       light.current.position.copy(sim.hit)
-      const glow = Math.max(0, 1 - sim.beamAge / 0.25)
-      light.current.intensity = glow * 6 * box.size * box.size
-      light.current.distance = box.size * 1.5
+      light.current.intensity = Math.max(0, 1 - sim.beamAge / 0.22) * 0.12 * box.size ** 2
+      light.current.distance = box.size * 0.55
       light.current.color.copy(assets.beamMaterial.color).multiplyScalar(0.2)
     }
-
-    // Break flash.
     sim.burstAge += dt
     if (burst.current) {
       const k = sim.burstAge / 0.45
       burst.current.visible = k < 1
       if (k < 1) {
         burst.current.position.copy(sim.burstAt)
-        burst.current.scale.setScalar(sim.burstSize * (1.5 + 2.5 * k))
+        burst.current.scale.setScalar(sim.burstSize * (1.5 + 2 * k))
         assets.burstMaterial.opacity = (1 - k) ** 3
       }
     }
 
-    // Particles.
-    const step = (pool: Particle[], instanced: InstancedMesh | null, drag: number) => {
+    const step = (
+      pool: Particle[],
+      instanced: InstancedMesh | null,
+      drag: number,
+      collect = false,
+    ) => {
       if (!instanced) return
-      let n = 0
+      let count = 0
+      let strands = 0
       for (const p of pool) {
         if (!p.alive) continue
         p.age += dt
         if (p.age >= p.life) {
           p.alive = false
+          if (collect) sim.intakeGlow = 1
           continue
         }
-        p.velocity.multiplyScalar(Math.max(0, 1 - drag * dt))
-        p.position.addScaledVector(p.velocity, dt)
+        const t = p.age / p.life
+        if (collect) {
+          // Outward fracture arc, then an accelerating pull into the cargo intake.
+          const k = t ** 2
+          p.position
+            .copy(p.start)
+            .multiplyScalar((1 - k) ** 2)
+            .addScaledVector(p.control, 2 * (1 - k) * k)
+            .addScaledVector(collector, k * k)
+          if (t > 0.18 && tethers.current) {
+            sim.w.copy(p.position).sub(collector)
+            sim.dummy.position.copy(collector).addScaledVector(sim.w, 0.5)
+            sim.dummy.quaternion.setFromUnitVectors(
+              sim.v.set(0, 0, 1),
+              sim.dir.copy(sim.w).normalize(),
+            )
+            sim.dummy.scale.set(box.size * 0.0009, box.size * 0.0009, sim.w.length())
+            sim.dummy.updateMatrix()
+            tethers.current.setMatrixAt(strands++, sim.dummy.matrix)
+          }
+        } else {
+          p.velocity.multiplyScalar(Math.max(0, 1 - drag * dt))
+          p.position.addScaledVector(p.velocity, dt)
+        }
         p.angle += p.spin * dt
-        const k = 1 - p.age / p.life
         sim.dummy.position.copy(p.position)
         sim.dummy.quaternion.setFromAxisAngle(p.axis, p.angle)
-        sim.dummy.scale.setScalar(p.size * Math.min(1, k * 2.5))
+        sim.dummy.scale.setScalar(p.size * Math.min(1, (1 - t) * 3))
         sim.dummy.updateMatrix()
-        instanced.setMatrixAt(n++, sim.dummy.matrix)
+        instanced.setMatrixAt(count++, sim.dummy.matrix)
       }
-      instanced.count = n
+      instanced.count = count
       instanced.instanceMatrix.needsUpdate = true
+      if (collect && tethers.current) {
+        tethers.current.count = strands
+        tethers.current.instanceMatrix.needsUpdate = true
+      }
     }
     step(sim.sparks, sparksMesh.current, 3)
     step(sim.chunks, chunksMesh.current, 0.8)
+    step(sim.salvage, salvageMesh.current, 0, true)
+    sim.intakeGlow = Math.max(0, sim.intakeGlow - dt * 5)
+    if (intake.current) {
+      intake.current.visible = sim.intakeGlow > 0
+      intake.current.position.copy(collector)
+      intake.current.scale.setScalar(box.size * 0.045)
+      assets.intakeMaterial.opacity = sim.intakeGlow * 0.5
+    }
 
-    // Tell the HTML overlay where the asteroid is on screen.
     sim.v.copy(sim.center).project(state.camera)
     sim.w.copy(sim.center).addScaledVector(state.camera.up, sim.radius).project(state.camera)
     asteroidOnScreen.x = ((sim.v.x + 1) / 2) * state.size.width
     asteroidOnScreen.y = ((1 - sim.v.y) / 2) * state.size.height
     asteroidOnScreen.radius = Math.abs(sim.w.y - sim.v.y) * 0.5 * state.size.height
     asteroidOnScreen.visible = true
+    Object.assign(asteroidOnScreen, sim.asteroid)
   })
-
-  useEffect(
-    () => () => {
-      asteroidOnScreen.visible = false
-    },
-    [],
-  )
 
   return (
     <>
-      <group ref={holder}>
-        <mesh ref={rock} material={assets.rockMaterial.material} />
-        <instancedMesh
-          ref={crystals}
-          args={[assets.crystalGeometry, assets.crystalMaterial, CRYSTALS]}
-          frustumCulled={false}
-        />
-      </group>
+      {FIELD_SLOTS.map((spec, i) => (
+        <group
+          key={spec.x}
+          ref={(node) => {
+            holders.current[i] = node
+          }}
+        >
+          <mesh
+            ref={(node) => {
+              rocks.current[i] = node
+            }}
+            geometry={assets.geometries[i % 4] as Mesh['geometry']}
+            material={(assets.rockMaterials[i] as ReturnType<typeof createRockMaterial>).material}
+          />
+          <instancedMesh
+            ref={(node) => {
+              crystals.current[i] = node
+            }}
+            args={[assets.crystalGeometry, assets.crystalMaterial, CRYSTALS]}
+            count={0}
+            frustumCulled={false}
+          />
+        </group>
+      ))}
       <instancedMesh
         ref={sparksMesh}
-        args={[assets.sparkGeometry, assets.sparkMaterial, SPARKS]}
+        args={[assets.crystalGeometry, assets.sparkMaterial, SPARKS]}
+        count={0}
         instanceMatrix-usage={DynamicDrawUsage}
         frustumCulled={false}
       />
       <instancedMesh
         ref={chunksMesh}
         args={[assets.chunkGeometry, assets.chunkMaterial, CHUNKS]}
+        count={0}
+        instanceMatrix-usage={DynamicDrawUsage}
+        frustumCulled={false}
+      />
+      <instancedMesh
+        ref={salvageMesh}
+        args={[assets.crystalGeometry, assets.crystalMaterial, SALVAGE]}
+        count={0}
+        instanceMatrix-usage={DynamicDrawUsage}
+        frustumCulled={false}
+      />
+      <instancedMesh
+        ref={tethers}
+        args={[assets.beamGeometry, assets.tractorMaterial, SALVAGE]}
+        count={0}
         instanceMatrix-usage={DynamicDrawUsage}
         frustumCulled={false}
       />
@@ -503,8 +614,17 @@ export function Mining({ anchor, bow, reducedMotion }: MiningProps) {
       />
       <sprite ref={impact} material={assets.impactMaterial} visible={false} />
       <sprite ref={burst} material={assets.burstMaterial} visible={false} />
+      <sprite ref={intake} material={assets.intakeMaterial} visible={false} />
       <pointLight ref={light} decay={2} intensity={0} />
-      <WeaponEffects bow={bow} target={sim.hit} asteroid={sim} reducedMotion={reducedMotion} />
+      <WeaponEffects
+        bow={bow}
+        target={sim.projectileHit}
+        chainTarget={sim.chainTarget}
+        asteroid={sim}
+        reducedMotion={reducedMotion}
+      />
     </>
   )
 }
+
+useGLTF.preload(miningUrl, false, true)

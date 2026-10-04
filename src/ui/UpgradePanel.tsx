@@ -178,7 +178,7 @@ export function UpgradePanel() {
   return (
     <section
       aria-label="Upgrades"
-      className="panel flex min-h-0 w-full flex-col overflow-hidden max-lg:max-h-[38dvh] lg:max-h-full"
+      className="panel flex min-h-0 w-full flex-col overflow-hidden max-lg:max-h-[28dvh] lg:max-h-full"
     >
       <nav
         aria-label="Upgrade systems"
