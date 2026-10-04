@@ -3,7 +3,9 @@ import { SHIP_FORMS, UPGRADES, WEAPONS, type WeaponId } from './content'
 import {
   buyWeapon,
   createInitialState,
+  createWeaponCharges,
   fire,
+  fireSalvo,
   type GameState,
   selectWeapon,
   shipForm,
@@ -16,6 +18,112 @@ function armed(id: WeaponId, patch: Partial<GameState> = {}): GameState {
   const initial = createInitialState()
   return { ...initial, weapons: { ...initial.weapons, [id]: 1 }, activeWeapon: id, ...patch }
 }
+
+describe('mounted weapon volleys', () => {
+  const allInstalled = (): GameState => ({
+    ...createInitialState(),
+    weapons: Object.fromEntries(WEAPONS.map((w) => [w.id, 1])) as GameState['weapons'],
+    asteroid: { kind: 'rock' as const, hp: 100, maxHp: 100 },
+  })
+
+  it('fires every installed system at its own rhythm without selection, counting one input', () => {
+    let state = allInstalled()
+    let charges = createWeaponCharges()
+    const fired = createWeaponCharges()
+    for (let i = 0; i < 12; i++) {
+      const result = fireSalvo(state, charges, noCrit)
+      expect(result.salvo?.some((s) => s.weapon === 'pulse')).toBe(true)
+      expect(result.state.clicks).toBe(i + 1)
+      for (const shot of result.salvo ?? []) fired[shot.weapon]++
+      state = result.state
+      charges = result.charges
+    }
+    expect(fired).toEqual({
+      pulse: 12,
+      plasma: 4,
+      railgun: 6,
+      tesla: 3,
+      cryo: 4,
+      swarm: 3,
+      singularity: 2,
+    })
+  })
+
+  it('preserves plasma charge across pulse volleys and ignores locked systems', () => {
+    let state = armed('pulse', {
+      weapons: { ...createInitialState().weapons, plasma: 1 },
+      asteroid: { kind: 'rock', hp: 100, maxHp: 100 },
+    })
+    let charges = createWeaponCharges()
+    for (let i = 0; i < 8; i++) {
+      const result = fireSalvo(state, charges, noCrit)
+      expect(result.salvo?.every((s) => s.weapon === 'pulse' || s.weapon === 'plasma')).toBe(true)
+      if (i === 7)
+        expect(result.salvo?.find((s) => s.weapon === 'plasma')).toMatchObject({
+          special: 'Plasma detonation',
+          damage: 4,
+        })
+      state = result.state
+      charges = result.charges
+    }
+    expect(charges.plasma).toBe(3)
+  })
+
+  it('retains frozen targets through intervening pulses until the cryo system shatters them', () => {
+    let state = armed('pulse', {
+      weapons: { ...createInitialState().weapons, cryo: 1 },
+      clicks: 2,
+      asteroid: { kind: 'rock', hp: 100, maxHp: 100 },
+    })
+    let charges = createWeaponCharges()
+    for (let i = 2; i <= 5; i++) {
+      const result = fireSalvo(state, charges, noCrit)
+      expect(result.state.frozen).toBe(i < 5)
+      if (i === 5)
+        expect(result.salvo?.find((s) => s.weapon === 'cryo')).toMatchObject({
+          special: 'Ice shatter',
+          damage: 3,
+          gained: 6,
+        })
+      state = result.state
+      charges = result.charges
+    }
+  })
+
+  it('clamps the whole volley to one acquired target and leaves its replacement untouched', () => {
+    const next = { kind: 'crystal' as const, hp: 8, maxHp: 8 }
+    const result = fireSalvo(
+      { ...allInstalled(), asteroid: { kind: 'rock', hp: 1, maxHp: 4 } },
+      createWeaponCharges(),
+      noCrit,
+      { nextAsteroid: next },
+    )
+    expect(result.damage).toBe(1)
+    expect(result.gained).toBe(1)
+    expect(result.bonus).toBe(2)
+    expect(result.state.asteroidsMined).toBe(1)
+    expect(result.state.asteroid).toEqual(next)
+    expect(result.state.energy).toBe(3)
+  })
+
+  it('lets a charged singularity collapse lead the other mounted systems', () => {
+    const charges = { ...createWeaponCharges(), singularity: 3 }
+    const result = fireSalvo(
+      { ...allInstalled(), clicks: 18, asteroid: { kind: 'crystal', hp: 10, maxHp: 10 } },
+      charges,
+      noCrit,
+    )
+    expect(result.salvo?.[0]).toMatchObject({
+      weapon: 'singularity',
+      special: 'Event horizon',
+      damage: 10,
+      bonus: 45,
+    })
+    expect(result.state.clicks).toBe(19)
+    expect(result.state.energy).toBe(75)
+    expect(result.state.asteroidsMined).toBe(1)
+  })
+})
 
 describe('weapon arsenal', () => {
   it('charges for unlocks, equips them and scales upgrade prices', () => {

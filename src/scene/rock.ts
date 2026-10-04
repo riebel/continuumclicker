@@ -25,6 +25,7 @@ export interface RockMaterial {
     /** 0..1: white-hot flash right after a hit. */
     readonly uFlash: { value: number }
     readonly uSeed: { value: number }
+    readonly uFrozen: { value: number }
     readonly uCrackColor: { value: Color }
   }
 }
@@ -35,6 +36,7 @@ export function createRockMaterial(base?: MeshStandardMaterial): RockMaterial {
     uDamage: { value: 0 },
     uFlash: { value: 0 },
     uSeed: { value: 0 },
+    uFrozen: { value: 0 },
     uCrackColor: { value: new Color(4, 1.3, 0.35) },
   }
   const material =
@@ -45,7 +47,7 @@ export function createRockMaterial(base?: MeshStandardMaterial): RockMaterial {
       metalness: 0.05,
       vertexColors: true,
     })
-  material.customProgramCacheKey = () => 'mining-crust-v2'
+  material.customProgramCacheKey = () => 'mining-crust-v3'
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms)
     shader.vertexShader = shader.vertexShader
@@ -58,6 +60,7 @@ export function createRockMaterial(base?: MeshStandardMaterial): RockMaterial {
         uniform float uDamage;
         uniform float uFlash;
         uniform float uSeed;
+        uniform float uFrozen;
         uniform vec3 uCrackColor;
         varying vec3 vLocal;
         float rockHash(vec3 p) {
@@ -81,7 +84,14 @@ export function createRockMaterial(base?: MeshStandardMaterial): RockMaterial {
         '#include <color_fragment>',
         /* glsl */ `#include <color_fragment>
         vec3 seeded = vLocal * 2.3 + uSeed;
-        diffuseColor.rgb *= 0.65 + 0.55 * rockNoise(seeded) + 0.2 * rockNoise(seeded * 3.1);`,
+        diffuseColor.rgb *= 0.65 + 0.55 * rockNoise(seeded) + 0.2 * rockNoise(seeded * 3.1);
+        float ice = smoothstep(0.32, 0.68, rockNoise(seeded * 2.8)) * uFrozen;
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.4,0.66,0.78), ice * 0.72);`,
+      )
+      .replace(
+        '#include <roughnessmap_fragment>',
+        /* glsl */ `#include <roughnessmap_fragment>
+        roughnessFactor = mix(roughnessFactor, 0.24, uFrozen * 0.7);`,
       )
       .replace(
         '#include <emissivemap_fragment>',
@@ -93,7 +103,8 @@ export function createRockMaterial(base?: MeshStandardMaterial): RockMaterial {
         float fine = abs(rockNoise(q * 2.3 + 5.0) - 0.5) + 0.6 * (1.0 - uDamage) * 0.05;
         float width = 0.004 + 0.022 * uDamage;
         float crack = (1.0 - smoothstep(width * 0.4, width, min(coarse, fine))) * step(0.001, uDamage);
-        totalEmissiveRadiance += uCrackColor * crack * (0.4 + uDamage) + vec3(1.4, 0.9, 0.6) * uFlash;`,
+        totalEmissiveRadiance += uCrackColor * crack * (0.4 + uDamage) + vec3(1.4, 0.9, 0.6) * uFlash;
+        totalEmissiveRadiance += vec3(0.08,0.3,0.45) * ice * uFrozen;`,
       )
   }
   return { material, uniforms }

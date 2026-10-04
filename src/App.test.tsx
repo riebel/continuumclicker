@@ -147,19 +147,29 @@ describe('App', () => {
     expect(screen.getAllByText('Ship module 1 of 5, next at 5 owned')).toHaveLength(1)
   })
 
-  it('unlocks, equips and switches between weapons', async () => {
+  it('installs additional weapons and fires them automatically alongside the pulse', async () => {
     const user = userEvent.setup()
     render(<App />)
-    setEnergy(500)
+    setEnergy(5000)
     await user.click(screen.getByRole('button', { name: /Arsenal 7/i }))
-    await user.click(screen.getByRole('button', { name: /Unlock.*Plasma devastator/i }))
+    await user.click(screen.getByRole('button', { name: /Install.*Plasma devastator/i }))
+    await user.click(screen.getByRole('button', { name: /Install.*Railgun/i }))
     expect(gameStore.getState().game.weapons.plasma).toBe(1)
-    expect(screen.getByLabelText('Active weapon')).toHaveValue('plasma')
+    expect(screen.queryByLabelText('Active weapon')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('img', { name: 'Plasma devastator, level 1, installed' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('img', { name: 'Titan railgun, level 1, installed' }),
+    ).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /fire the mining laser/i }))
-    expect(gameStore.getState().lastShot?.weapon).toBe('plasma')
-    await user.selectOptions(screen.getByLabelText('Active weapon'), 'pulse')
-    expect(gameStore.getState().game.activeWeapon).toBe('pulse')
-    expect(gameStore.getState().game.weaponCharge).toBe(0)
+    await user.click(screen.getByRole('button', { name: /fire the mining laser/i }))
+    expect(gameStore.getState().lastShot?.salvo?.map((s) => s.weapon)).toEqual([
+      'plasma',
+      'railgun',
+      'pulse',
+    ])
+    expect(gameStore.getState().game.weapons).toMatchObject({ pulse: 1, plasma: 1, railgun: 1 })
   })
 
   it('engages a speed level', async () => {

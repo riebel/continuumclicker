@@ -1,6 +1,6 @@
 import type { Asteroid, AsteroidKind } from '../game/engine'
 
-export const PROJECTILE_SECONDS = 0.24
+export const PROJECTILE_SECONDS = 0.38
 export const TARGET_PASS_PHASE = 0.58
 
 /** Belt flow is deliberately readable even at the highest drive setting (one lap >= 13s). */

@@ -3,7 +3,60 @@ import { memoryStorage } from '../test/memoryStorage'
 import { COMETS, CRYSTAL_VEIN, DARK_MATTER } from './content'
 import { createInitialState } from './engine'
 import { SAVE_KEY, saveGame } from './save'
+import { sectorFor } from './sector'
 import { createGameStore } from './store'
+
+describe('mounted system charges', () => {
+  beforeEach(() => vi.useFakeTimers({ now: 0 }))
+  afterEach(() => vi.useRealTimers())
+
+  const chargedStore = () => {
+    const store = createGameStore(memoryStorage(), 0, () => 0.99)
+    store.setState((s) => ({
+      game: {
+        ...s.game,
+        weapons: { ...s.game.weapons, plasma: 1 },
+        asteroid: { kind: 'rock', hp: 100, maxHp: 100 },
+      },
+    }))
+    for (let i = 0; i < 5; i++) store.getState().actions.fire()
+    return store
+  }
+
+  it('keeps independently accumulated weapon charge when plotting a course', () => {
+    const store = chargedStore()
+    const destination = sectorFor(store.getState().game.sectorSeed).systems.find(
+      (s) => s.id !== 'home',
+    )
+    expect(destination).toBeDefined()
+    store.getState().actions.setCourse(destination?.id ?? '')
+    store.getState().actions.fire()
+    store.getState().actions.fire()
+    expect(
+      store
+        .getState()
+        .actions.fire()
+        .salvo?.find((s) => s.weapon === 'plasma')?.special,
+    ).toBe('Plasma detonation')
+  })
+
+  it('clears a previous sector’s charge before a newly installed system fires', () => {
+    const store = chargedStore()
+    store.setState((s) => ({ game: { ...s.game, lifetimeEnergy: DARK_MATTER.base } }))
+    store.getState().actions.jump()
+    store.setState((s) => ({
+      game: { ...s.game, energy: 1000, asteroid: { kind: 'rock', hp: 100, maxHp: 100 } },
+    }))
+    store.getState().actions.buyWeapon('plasma')
+    store.getState().actions.fire()
+    store.getState().actions.fire()
+    const shot = store.getState().actions.fire()
+    expect(shot.salvo?.find((s) => s.weapon === 'plasma')).toMatchObject({
+      damage: 1,
+      special: null,
+    })
+  })
+})
 
 describe('game store', () => {
   it('advances by wall-clock time', () => {

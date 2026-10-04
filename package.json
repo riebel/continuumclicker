@@ -25,7 +25,9 @@
     "check": "npm run lint && npm run typecheck && npm run test",
     "model": "node blender/run.mjs build_ship.py && gltf-transform meshopt blender/build/ship.raw.glb src/assets/ship.glb",
     "model:refits": "node blender/run.mjs build_refits.py && gltf-transform meshopt blender/build/refits.raw.glb src/assets/refits.glb",
-    "model:mining": "node blender/run.mjs build_mining.py && gltf-transform meshopt blender/build/mining.raw.glb src/assets/mining.glb"
+    "model:mining": "node blender/run.mjs build_mining.py && gltf-transform meshopt blender/build/mining.raw.glb src/assets/mining.glb",
+    "model:arsenal": "node blender/run.mjs build_arsenal.py && gltf-transform meshopt blender/build/arsenal.raw.glb src/assets/arsenal.glb",
+    "model:projectiles": "node blender/run.mjs build_projectiles.py && gltf-transform meshopt blender/build/projectiles.raw.glb src/assets/projectiles.glb"
   },
   "dependencies": {
     "@fontsource-variable/source-sans-3": "^5.3.0",

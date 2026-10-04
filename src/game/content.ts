@@ -210,7 +210,7 @@ export const WEAPONS = [
     tag: 'Overcharge',
     color: '#ff4e9a',
     baseCost: 200,
-    effect: 'Every third shot detonates for 4 damage. Upgrades add +1 blast damage.',
+    effect: 'Every third plasma discharge detonates for 4 damage. Upgrades add +1 blast damage.',
     special: 'Plasma detonation',
   },
   {
@@ -258,7 +258,7 @@ export const WEAPONS = [
     color: '#798bff',
     baseCost: 1_000_000,
     effect:
-      'Every fourth shot collapses the entire asteroid for a triple break reward. Upgrades increase the reward.',
+      'Every fourth projector discharge collapses the asteroid for a triple break reward. Upgrades increase the reward.',
     special: 'Event horizon',
   },
 ] as const
@@ -267,6 +267,17 @@ export type WeaponId = (typeof WEAPONS)[number]['id']
 export type WeaponDef = (typeof WEAPONS)[number]
 export const WEAPON_MAX_LEVEL = 5
 export const WEAPON_COST_GROWTH = 4
+
+/** Independent hardpoints and automatic firing rhythm, counted in player volleys. */
+export const WEAPON_SYSTEMS: Record<WeaponId, { mount: string; cadence: number; phase: number }> = {
+  pulse: { mount: 'Forward turret', cadence: 1, phase: 0 },
+  plasma: { mount: 'Twin shoulder cannons', cadence: 3, phase: 1 },
+  railgun: { mount: 'Ventral rail spine', cadence: 2, phase: 1 },
+  tesla: { mount: 'Twin dorsal coils', cadence: 4, phase: 0 },
+  cryo: { mount: 'Twin underside emitters', cadence: 3, phase: 2 },
+  swarm: { mount: 'Port & starboard missile batteries', cadence: 4, phase: 2 },
+  singularity: { mount: 'Aft dorsal projector', cadence: 6, phase: 0 },
+}
 
 /** Combined module tiers reshape the whole silhouette, starting with the very first purchase. */
 export const SHIP_FORMS = [

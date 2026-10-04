@@ -12,13 +12,15 @@ import {
   Quaternion,
   Vector3,
 } from 'three'
+import arsenalUrl from '../assets/arsenal.glb?url'
 import refitsUrl from '../assets/refits.glb?url'
 import shipUrl from '../assets/ship.glb?url'
-import { UPGRADES } from '../game/content'
+import { UPGRADES, WEAPONS, type WeaponId } from '../game/content'
 import { shipForm, visualTier, warpIntensity } from '../game/engine'
 import { gameStore, useGame } from '../game/store'
 import { HEADING, layoutPosition, SHIP_LAYOUT, SHIP_ORIENTATION, stageBox } from './constants'
 import { attachPlume, disposePlume, type NozzleKind, type Plume, updatePlume } from './plume'
+import type { WeaponMuzzles } from './weaponMounts'
 
 interface ModuleNode {
   readonly node: Object3D
@@ -38,8 +40,8 @@ interface PreparedShip {
   /** Marker at the tip of the bow, where the mining laser fires from. */
   readonly bow: Object3D
   readonly modules: ModuleNode[]
-  readonly muzzles: Map<string, Object3D>
-  readonly aim: Group
+  readonly muzzles: Map<WeaponId, Object3D[]>
+  readonly aims: { group: Group; weapon: WeaponId }[]
   readonly plumes: Plume[]
   readonly center: Vector3
   readonly radius: number
@@ -53,21 +55,27 @@ const INSTALL_MS = 900
 
 function prepare(scene: Group): PreparedShip {
   scene.updateMatrixWorld(true)
-  const aim = new Group()
+  const aims: PreparedShip['aims'] = []
+  const mounts = new Map<string, Group>()
   const assemblies: Object3D[] = []
   scene.traverse((node) => {
-    if (node.userData.weaponMount) node.getWorldPosition(aim.position)
-    if (node.userData.weapon) assemblies.push(node)
+    if (typeof node.userData.weaponMount === 'string') {
+      const group = new Group()
+      node.getWorldPosition(group.position)
+      mounts.set(node.userData.weaponMount, group)
+      aims.push({ group, weapon: node.userData.weaponSystem as WeaponId })
+    }
+    if (node.userData.mount) assemblies.push(node)
   })
-  scene.add(aim)
+  for (const aim of aims) scene.add(aim.group)
   scene.updateMatrixWorld(true)
-  for (const assembly of assemblies) aim.attach(assembly)
+  for (const assembly of assemblies) mounts.get(assembly.userData.mount)?.attach(assembly)
   const bounds = new Box3().setFromObject(scene)
   const center = bounds.getCenter(new Vector3())
   const radius = bounds.getSize(new Vector3()).length() / 2
 
   const modules: ModuleNode[] = []
-  const muzzles = new Map<string, Object3D>()
+  const muzzles = new Map<WeaponId, Object3D[]>()
   const plumes: Plume[] = []
   const materials = new Set<MeshStandardMaterial>()
 
@@ -82,7 +90,12 @@ function prepare(scene: Group): PreparedShip {
       nozzle?: NozzleKind
       radius?: number
     }
-    if (data.muzzle) muzzles.set(data.muzzle, object)
+    if (data.muzzle) {
+      const id = data.muzzle as WeaponId
+      const outlets = muzzles.get(id) ?? []
+      outlets.push(object)
+      muzzles.set(id, outlets)
+    }
     if ((data.module && data.tier) || data.form || data.weapon) {
       const pivot = new Box3().setFromObject(object).getCenter(new Vector3())
       object.parent?.worldToLocal(pivot)
@@ -126,7 +139,7 @@ function prepare(scene: Group): PreparedShip {
     bow,
     modules,
     muzzles,
-    aim,
+    aims,
     plumes,
     center,
     radius,
@@ -153,22 +166,29 @@ interface ShipProps {
   bow: Vector3
   target?: Vector3
   collector?: Vector3
+  muzzles?: WeaponMuzzles
   reducedMotion: boolean
 }
 
-export function Ship({ anchor, bow, target, collector, reducedMotion }: ShipProps) {
+export function Ship({ anchor, bow, target, collector, muzzles, reducedMotion }: ShipProps) {
   const { scene: template } = useGLTF(shipUrl, false, true)
   const { scene: refits } = useGLTF(refitsUrl, false, true)
+  const { scene: arsenal } = useGLTF(arsenalUrl, false, true)
   // Keep the cached glTF untouched: remounts must not accumulate exhausts or bow markers.
   const { scene, ship } = useMemo(() => {
     const scene = new Group()
-    scene.add(template.clone(true), refits.clone(true))
+    const hullRefits = refits.clone(true)
+    const legacy: Object3D[] = []
+    hullRefits.traverse((node) => {
+      if (node.userData.weapon || node.userData.weaponMount) legacy.push(node)
+    })
+    for (const node of legacy) node.removeFromParent()
+    scene.add(template.clone(true), hullRefits, arsenal.clone(true))
     return { scene, ship: prepare(scene) }
-  }, [template, refits])
+  }, [template, refits, arsenal])
   const tiers = useTiers()
   const form = useGame((s) => shipForm(s.game))
-  const weapon = useGame((s) => s.game.activeWeapon)
-  const weaponLevel = useGame((s) => s.game.weapons[s.game.activeWeapon] ?? 1)
+  const weapons = useGame((s) => s.game.weapons)
   const root = useRef<Group>(null)
   const light = useRef<PointLight>(null)
   const throttle = useRef(0)
@@ -193,7 +213,7 @@ export function Ship({ anchor, bow, target, collector, reducedMotion }: ShipProp
       const visible = m.form
         ? m.form <= form
         : m.weapon
-          ? m.weapon === weapon && m.tier <= weaponLevel
+          ? m.tier <= (weapons[m.weapon as WeaponId] ?? 0)
           : m.tier <= (tiers[m.module ?? ''] ?? 0)
       if (visible && !m.node.visible) m.installedAt = mounted.current ? now : 0
       m.node.visible = visible
@@ -204,7 +224,7 @@ export function Ship({ anchor, bow, target, collector, reducedMotion }: ShipProp
       }
     }
     mounted.current = true
-  }, [ship, tiers, form, weapon, weaponLevel])
+  }, [ship, tiers, form, weapons])
 
   useFrame((state, delta) => {
     const group = root.current
@@ -274,20 +294,36 @@ export function Ship({ anchor, bow, target, collector, reducedMotion }: ShipProp
         m.node.scale.copy(m.scale).multiplyScalar(k)
         if (t >= 1) m.installedAt = 0
       }
-      if (m.weapon && m.node.visible) m.node.position.x -= recoil.current.kick * 0.14
+      const firing =
+        latest?.salvo?.some((shot) => shot.weapon === m.weapon) ?? latest?.weapon === m.weapon
+      if (m.weapon && m.node.visible && m.node.userData.mount && firing)
+        m.node.position.x -= recoil.current.kick * 0.14
     }
     group.updateMatrixWorld(true)
     if (target && target.lengthSq() > 0) {
-      scene.worldToLocal(temp.v.copy(target))
-      temp.v.sub(ship.aim.position).normalize()
-      temp.aim.setFromUnitVectors(temp.pivot.set(1, 0, 0), temp.v)
-      const angle = temp.aim.angleTo(temp.neutral)
-      if (angle > 1.1) temp.aim.slerp(temp.neutral, 1 - 1.1 / angle)
-      ship.aim.quaternion.slerp(temp.aim, reducedMotion ? 1 : 1 - Math.exp(-dt * 14))
-      ship.aim.updateMatrixWorld(true)
+      for (const { group: aim } of ship.aims) {
+        scene.worldToLocal(temp.v.copy(target))
+        temp.v.sub(aim.position).normalize()
+        temp.aim.setFromUnitVectors(temp.pivot.set(1, 0, 0), temp.v)
+        const angle = temp.aim.angleTo(temp.neutral)
+        if (angle > 1.35) temp.aim.slerp(temp.neutral, 1 - 1.35 / angle)
+        aim.quaternion.slerp(temp.aim, reducedMotion ? 1 : 1 - Math.exp(-dt * 14))
+        aim.updateMatrixWorld(true)
+      }
     }
-    const emitter = ship.muzzles.get(gameStore.getState().game.activeWeapon) ?? ship.bow
+    const emitter = ship.muzzles.get('pulse')?.[0] ?? ship.bow
     emitter.getWorldPosition(bow)
+    if (muzzles)
+      for (const weapon of WEAPONS) {
+        const outlets = ship.muzzles.get(weapon.id) ?? []
+        const positions = muzzles.get(weapon.id) ?? []
+        positions.length = outlets.length
+        for (const [i, outlet] of outlets.entries()) {
+          positions[i] ??= new Vector3()
+          outlet.getWorldPosition(positions[i] as Vector3)
+        }
+        muzzles.set(weapon.id, positions)
+      }
     if (collector) collector.copy(scene.localToWorld(temp.v.set(-3.8, 1, 1.5)))
   })
 
@@ -308,3 +344,4 @@ function isVisible(object: Object3D): boolean {
 
 useGLTF.preload(shipUrl, false, true)
 useGLTF.preload(refitsUrl, false, true)
+useGLTF.preload(arsenalUrl, false, true)

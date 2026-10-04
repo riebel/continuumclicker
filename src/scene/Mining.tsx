@@ -20,7 +20,7 @@ import {
   Vector3,
 } from 'three'
 import miningUrl from '../assets/mining.glb?url'
-import { WEAPONS, type WeaponId } from '../game/content'
+import { WEAPONS } from '../game/content'
 import { type Shot, warpIntensity } from '../game/engine'
 import { mulberry32 } from '../game/random'
 import { gameStore } from '../game/store'
@@ -36,12 +36,12 @@ import {
 import { createRockMaterial, crystalTransforms } from './rock'
 import { asteroidOnScreen } from './target'
 import { WeaponEffects } from './WeaponEffects'
+import { type WeaponMuzzles, WeaponTargetCache } from './weaponMounts'
 
 const CRYSTALS = 11
 const SPARKS = 90
 const CHUNKS = 60
 const SALVAGE = 32
-const BEAM_SECONDS = 0.12
 const LASER_COLOR = new Color(6, 1.6, 0.45)
 const CRIT_COLOR = new Color(7, 5, 1.6)
 const CRYSTAL_COLOR = new Color(1.2, 4.5, 6)
@@ -106,11 +106,12 @@ interface MiningProps {
   /** Shared acquisition point for the ship's aiming rig. */
   target: Vector3
   collector: Vector3
+  muzzles?: WeaponMuzzles
   reducedMotion: boolean
 }
 
 /** Persistent distant targets; acquisition and salvage never move the player's input. */
-export function Mining({ anchor, bow, target, collector, reducedMotion }: MiningProps) {
+export function Mining({ anchor, bow, target, collector, muzzles, reducedMotion }: MiningProps) {
   const { scene: models } = useGLTF(miningUrl, false, true)
   const holders = useRef<(Group | null)[]>([])
   const rocks = useRef<(Mesh | null)[]>([])
@@ -119,8 +120,6 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
   const chunksMesh = useRef<InstancedMesh>(null)
   const salvageMesh = useRef<InstancedMesh>(null)
   const tethers = useRef<InstancedMesh>(null)
-  const beam = useRef<Mesh>(null)
-  const beamCore = useRef<Mesh>(null)
   const impact = useRef<Sprite>(null)
   const burst = useRef<Sprite>(null)
   const intake = useRef<Sprite>(null)
@@ -174,7 +173,6 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
       chunkMaterial: (get('rock_fragment').material as MeshStandardMaterial).clone(),
       beamGeometry: new CylinderGeometry(1, 1, 1, 10, 1, true).rotateX(Math.PI / 2),
       beamMaterial: new MeshBasicMaterial({ ...additive, color: LASER_COLOR }),
-      coreMaterial: new MeshBasicMaterial({ ...additive, color: new Color(8, 7, 6) }),
       tractorMaterial: new MeshBasicMaterial({
         ...additive,
         color: new Color(0.3, 1.6, 2.1),
@@ -210,6 +208,7 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
       now: 0,
       asteroid: game.asteroid,
       projectileHit: new Vector3(),
+      targetTracks: new WeaponTargetCache(),
       displayed: FIELD_SLOTS.map(() => -1),
       mineral: FIELD_SLOTS.map(() => false),
       crystalModels: FIELD_SLOTS.map(() => -1),
@@ -224,8 +223,6 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
       center: new Vector3(),
       radius: 1,
       beamAge: Number.POSITIVE_INFINITY,
-      weapon: 'pulse' as WeaponId,
-      beamWidth: 1,
       burstAge: Number.POSITIVE_INFINITY,
       burstSize: 1,
       burstAt: new Vector3(),
@@ -270,7 +267,10 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
           sim.projectileHit.copy(center).addScaledVector(sim.v, (sim.radii[slot] ?? 1) * 0.85)
           sim.chainTarget.copy(sim.centers[sim.field.slot(ordinal + 1)] as Vector3)
           const travel =
-            !reducedMotion && ['plasma', 'swarm'].includes(state.lastShot.weapon)
+            !reducedMotion &&
+            (state.lastShot.salvo ?? [state.lastShot]).some((s) =>
+              ['plasma', 'swarm'].includes(s.weapon),
+            )
               ? PROJECTILE_SECONDS
               : 0
           sim.shots.push({
@@ -373,6 +373,7 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
         if (mineral && visual.kind !== 'crystal') mineral.count = 0
         if (advance) visual.flash = Math.max(0, visual.flash - dt * 8)
         material.uniforms.uDamage.value = visual.damage
+        material.uniforms.uFrozen.value = frozen ? 1 : 0
         material.uniforms.uFlash.value = visual.flash * 0.22
         material.uniforms.uCrackColor.value.copy(
           frozen || visual.kind === 'crystal' ? CRYSTAL_COLOR : HOT_ROCK,
@@ -380,6 +381,7 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
       }
     }
     positionField(true)
+    sim.targetTracks.update(sim.field.rocks, sim.centers, sim.radii, bow)
 
     // Homing rounds follow the moving target until impact; acquisition waits for them.
     const flying = sim.shots.at(-1)
@@ -412,15 +414,6 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
       sim.hitTarget = shot.target.hp > 0 ? sim.field.target : null
       sim.chainTarget.copy(sim.centers[sim.field.slot(shot.ordinal + 1)] as Vector3)
       sim.beamAge = 0
-      sim.weapon = shot.weapon
-      sim.beamWidth =
-        shot.weapon === 'railgun'
-          ? 0.4
-          : shot.weapon === 'singularity'
-            ? 1.7
-            : shot.special
-              ? 1.3
-              : 1
       const color =
         shot.weapon !== 'pulse'
           ? new Color(WEAPONS.find((w) => w.id === shot.weapon)?.color).multiplyScalar(3)
@@ -470,7 +463,7 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
         sim.burstSize = radius
         sim.burstAt.copy(center)
       }
-      if (shot.weapon === 'singularity' && shot.special) {
+      if ((shot.salvo ?? [shot]).some((s) => s.weapon === 'singularity' && s.special)) {
         sim.pullAge = 0
         sim.pullAt.copy(center)
       }
@@ -494,25 +487,6 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
 
     // Impact stays in world space even when acquisition moves to the next asteroid.
     sim.beamAge += dt
-    const beamOn = sim.beamAge < BEAM_SECONDS && !['swarm', 'plasma', 'tesla'].includes(sim.weapon)
-    for (const [ref, width] of [
-      [beam, 0.0035],
-      [beamCore, 0.0012],
-    ] as const) {
-      const mesh = ref.current
-      if (!mesh) continue
-      mesh.visible = beamOn
-      if (!beamOn) continue
-      sim.w.copy(sim.hit).sub(bow)
-      mesh.position.copy(bow).addScaledVector(sim.w, 0.5)
-      mesh.quaternion.setFromUnitVectors(sim.v.set(0, 0, 1), sim.dir.copy(sim.w).normalize())
-      const w = box.size * width * sim.beamWidth * (1 - (sim.beamAge / BEAM_SECONDS) * 0.6)
-      mesh.scale.set(w, w, sim.w.length())
-    }
-    assets.beamMaterial.opacity = assets.coreMaterial.opacity = Math.max(
-      0,
-      1 - sim.beamAge / BEAM_SECONDS,
-    )
     if (impact.current) {
       const glow = Math.max(0, 1 - sim.beamAge / 0.2)
       impact.current.visible = glow > 0
@@ -666,25 +640,15 @@ export function Mining({ anchor, bow, target, collector, reducedMotion }: Mining
         instanceMatrix-usage={DynamicDrawUsage}
         frustumCulled={false}
       />
-      <mesh
-        ref={beam}
-        geometry={assets.beamGeometry}
-        material={assets.beamMaterial}
-        visible={false}
-      />
-      <mesh
-        ref={beamCore}
-        geometry={assets.beamGeometry}
-        material={assets.coreMaterial}
-        visible={false}
-      />
       <sprite ref={impact} material={assets.impactMaterial} visible={false} />
       <sprite ref={burst} material={assets.burstMaterial} visible={false} />
       <sprite ref={intake} material={assets.intakeMaterial} visible={false} />
       <pointLight ref={light} decay={2} intensity={0} />
       <WeaponEffects
         bow={bow}
+        muzzles={muzzles}
         target={sim.projectileHit}
+        targets={sim.targetTracks}
         chainTarget={sim.chainTarget}
         asteroid={sim}
         reducedMotion={reducedMotion}

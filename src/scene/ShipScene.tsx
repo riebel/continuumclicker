@@ -10,6 +10,7 @@ import { CAMERA_DISTANCE, CAMERA_FOV } from './constants'
 import { Mining } from './Mining'
 import { Ship } from './Ship'
 import { Starfield } from './Starfield'
+import { createWeaponMuzzles } from './weaponMounts'
 
 const intensity = () => warpIntensity(gameStore.getState().game)
 
@@ -35,6 +36,7 @@ export default function ShipScene({ anchor, reducedMotion, onReady }: ShipSceneP
   const [bow] = useState(() => new Vector3())
   const [target] = useState(() => new Vector3())
   const [collector] = useState(() => new Vector3())
+  const [muzzles] = useState(createWeaponMuzzles)
   return (
     <Canvas
       flat
@@ -88,6 +90,7 @@ export default function ShipScene({ anchor, reducedMotion, onReady }: ShipSceneP
           bow={bow}
           target={target}
           collector={collector}
+          muzzles={muzzles}
           reducedMotion={reducedMotion}
         />
         <Mining
@@ -95,6 +98,7 @@ export default function ShipScene({ anchor, reducedMotion, onReady }: ShipSceneP
           bow={bow}
           target={target}
           collector={collector}
+          muzzles={muzzles}
           reducedMotion={reducedMotion}
         />
         <Ready onReady={onReady} />

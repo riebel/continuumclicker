@@ -26,12 +26,13 @@ import {
   catchComet,
   createAsteroid,
   createInitialState,
+  createWeaponCharges,
   crystalChance,
   darkMatterBonus,
   engage,
   equip,
   fastestSustainable,
-  fire,
+  fireSalvo,
   type GameState,
   hasModule,
   jumpSector,
@@ -143,6 +144,7 @@ export function createGameStore(
   let noticeId = 0
   let shotId = 0
   let eventId = 0
+  let systemCharges = createWeaponCharges()
   const between = ([min, max]: readonly [number, number]) => (min + random() * (max - min)) * 1000
 
   return createStore<GameStore>()((set, get) => {
@@ -239,10 +241,11 @@ export function createGameStore(
           const before = get()
           const nextId = before.miningTarget + 1
           const pending = before.pendingTargets[nextId % MINING_TARGET_COUNT]
-          const { state, ...shot } = fire(before.game, random, {
+          const { state, charges, ...shot } = fireSalvo(before.game, systemCharges, random, {
             vein: struck,
             ...(pending && { nextAsteroid: pending.asteroid }),
           })
+          systemCharges = charges
           const broken = shot.target.hp <= 0
           const pendingTargets = [...before.pendingTargets]
           if (broken) {
@@ -250,10 +253,7 @@ export function createGameStore(
             pendingTargets[nextId % MINING_TARGET_COUNT] = null
           }
           set({
-            game:
-              broken && pending
-                ? { ...state, frozen: state.activeWeapon === 'cryo' && pending.frozen }
-                : state,
+            game: broken && pending ? { ...state, frozen: pending.frozen } : state,
             miningTarget: broken ? nextId : before.miningTarget,
             pendingTargets,
             lastShot: {
@@ -361,6 +361,7 @@ export function createGameStore(
           const before = get().game
           const game = jumpSector(before, newSectorSeed(random))
           if (game === before) return
+          systemCharges = createWeaponCharges()
           set({
             game,
             notices: [],
@@ -450,6 +451,7 @@ export function createGameStore(
         },
 
         reset() {
+          systemCharges = createWeaponCharges()
           clearSave(storage)
           const time = Date.now()
           set({

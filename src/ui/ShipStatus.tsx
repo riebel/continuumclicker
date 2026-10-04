@@ -1,28 +1,15 @@
 import { SHIP_FORMS, WEAPONS } from '../game/content'
 import { shipForm, shipModuleTiers } from '../game/engine'
-import { useActions, useGame } from '../game/store'
+import { useGame } from '../game/store'
+import { WEAPON_ICONS } from './Arsenal'
 
 export function ShipStatus() {
   const formIndex = useGame((s) => shipForm(s.game))
   const tiers = useGame((s) => shipModuleTiers(s.game))
-  const active = useGame((s) => s.game.activeWeapon)
   const weapons = useGame((s) => s.game.weapons)
-  const charge = useGame((s) => s.game.weaponCharge)
-  const frozen = useGame((s) => s.game.frozen)
-  const { selectWeapon } = useActions()
   const form = SHIP_FORMS[formIndex] ?? SHIP_FORMS[0]
   const next = SHIP_FORMS[formIndex + 1]
-  const weapon = WEAPONS.find((w) => w.id === active) ?? WEAPONS[0]
-  const chargeLabel =
-    active === 'plasma'
-      ? `Overcharge ${charge % 3}/3`
-      : active === 'singularity'
-        ? `Collapse ${charge % 4}/4`
-        : active === 'cryo'
-          ? frozen
-            ? 'Shatter ready'
-            : 'Freeze ready'
-          : weapon.tag
+  const installed = WEAPONS.filter((w) => weapons[w.id] > 0)
 
   return (
     <div className="panel w-full max-w-sm px-3 py-2">
@@ -43,24 +30,25 @@ export function ShipStatus() {
         ))}
       </div>
       <div className="mt-2 flex items-center justify-between gap-2">
-        <select
-          aria-label="Active weapon"
-          value={active}
-          onChange={(event) => {
-            const found = WEAPONS.find((w) => w.id === event.target.value)
-            if (found) selectWeapon(found.id)
-          }}
-          className="min-w-0 cursor-pointer rounded bg-space px-1 py-1 text-sm font-semibold"
-          style={{ color: weapon.color }}
-        >
-          {WEAPONS.map((w) => (
-            <option key={w.id} value={w.id} disabled={!weapons[w.id]}>
-              {w.name}
-              {!weapons[w.id] ? ' · locked' : ''}
-            </option>
-          ))}
-        </select>
-        <span className="shrink-0 text-xs text-white/55">{chargeLabel}</span>
+        <fieldset className="flex flex-wrap gap-2" aria-label="Installed weapons">
+          {installed.map((w) => {
+            const Icon = WEAPON_ICONS[w.id]
+            return (
+              <span
+                role="img"
+                key={w.id}
+                title={`${w.name} · L${weapons[w.id]} · auto fire`}
+                aria-label={`${w.name}, level ${weapons[w.id]}, installed`}
+                className="flex items-center gap-0.5 text-[10px]"
+                style={{ color: w.color }}
+              >
+                <Icon className="size-4" aria-hidden="true" />
+                {weapons[w.id]}
+              </span>
+            )
+          })}
+        </fieldset>
+        <span className="shrink-0 text-xs text-white/55">Auto fire</span>
       </div>
       <p className="mt-1 text-xs text-white/40">
         {next ? `Next: ${next.name} · ${next.detail}` : form.detail}

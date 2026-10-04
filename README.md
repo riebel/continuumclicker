@@ -86,6 +86,8 @@ src/
 blender/
   build_ship.py Procedural, modular ship model → glTF
   build_refits.py Blender hull transformations and detailed weapon assemblies → glTF
+  build_arsenal.py Additive hardpoints, paired weapons and missile batteries → glTF
+  build_projectiles.py Detailed flight models with emissive cores and exhaust markers → glTF
   build_mining.py Sculpted asteroid variants, crystals and fragments → glTF
   render.py     Cycles stills: PWA icons and the no-WebGL fallback poster
   run.mjs       Runs those scripts with a locally installed Blender
@@ -109,9 +111,37 @@ module object carries `{"module": <upgrade id>, "tier": 1-5}` in its glTF extras
 cumulative hull refits and seven weapon assemblies. Curved armour, cooling collars, bores,
 hydraulics and recessed emitters are geometry, with ambient occlusion baked per installation
 stage into vertex colours. The exported `refits.glb` uses `form`, `weapon`, `weaponTier` and
-`muzzle` extras to select assemblies and place shot effects. Both assets share ship coordinates
-and the same installation animation. The build also saves an editable Blender scene at
+`muzzle` extras. Its hull refits share ship coordinates and the installation animation;
+the original alternative weapon meshes are superseded by the additive arsenal below.
+The build also saves an editable Blender scene at
 `blender/build/refits.raw.blend`.
+
+`blender/build_arsenal.py` builds eleven permanent hardpoints: a forward pulse turret, twin
+shoulder plasma cannons, a ventral railgun, twin dorsal Tesla coils, two underside cryo emitters,
+two outboard missile batteries and an aft dorsal singularity projector. Armoured saddles,
+hydraulic braces and fixed bearings remain attached to the hull while each weapon aims independently.
+All purchased systems stay installed. Missile upgrades add two launch cells per battery at each
+stage, from twelve total at L1 to twenty-eight at L5; other weapons gain capacitor/cooling banks.
+The asset uses the original hull's modelling tools and metals, with 32-sample Cycles AO baked
+into vertex colours. `arsenal.glb` is about 3 MB, with its editable scene at
+`blender/build/arsenal.raw.blend`. Extras identify `weapon`, `weaponTier`, `mount`, `weaponMount`,
+`weaponSystem` and each physical `muzzle`.
+
+One input fires a coordinated volley at the acquired target. The pulse fires every time;
+installed auxiliary systems automatically fire at staggered intervals, retaining independent
+plasma/singularity charge and cryo freeze/shatter state. Damage and rewards are clamped to one
+target per input. Each system fires from its own Blender muzzle markers, including both missile
+batteries. The Arsenal installs/upgrades systems; no weapon switching is required.
+
+`blender/build_projectiles.py` models the Hydra missile, plasma containment capsule and tungsten
+rail dart in Blender, with plated casings, bevelled swept fins, seeker lenses, cooling rings and
+real engine throats. It bakes 64-sample AO per model and exports a 129 KB `projectiles.glb` plus
+`blender/build/projectiles.raw.blend`. Runtime pools reuse the meshes/materials; Hydra and plasma
+exhausts use the same layered nozzle shaders as the ship. Narrow view-dependent beam volumes,
+ion wakes and short turbulent flashes replace solid cones, plain orbs and oversized impact rings.
+Each volley keeps a separate live target track, so rapid fire cannot redirect an older projectile
+to the newly acquired rock. Retired tracks preserve their final impact position. Cryo deposits
+reflective frost on the actual asteroid surface rather than drawing a wire cage around it.
 
 Mining uses five detailed Blender targets streaming against the ship's heading. Belt flow
 spools up/down with the engaged drive, with a capped rate that leaves targets readable at warp.
@@ -120,7 +150,7 @@ Destroying or passing a rock acquires an approaching neighbour with time left to
 The bounded target cache retains individual HP, crystal type and unexpired crystal locks when
 acquisition order changes; a pass awards no energy or destroyed-asteroid credit. The fixed firing
 surface still supports clicking, holding and keyboard activation. Crystal locks are consumed by
-normal firing, so bonuses do not require chasing moving targets. The weapon mount follows the
+normal firing, so bonuses do not require chasing moving targets. Each weapon mount follows the
 acquired target, plasma/missiles home on moving targets and hold acquisition until impact, and
 mineral fragments are pulled into the cargo intake. Tesla's chain points at the actual next
 target and damages its retained HP. Ice stops a rock's tumble while it still passes the ship;
@@ -144,6 +174,8 @@ To change the model, edit the script and rebuild with [Blender](https://www.blen
 ```sh
 npm run model                                         # → src/assets/ship.glb (meshopt compressed)
 npm run model:refits                                  # → src/assets/refits.glb + editable .blend
+npm run model:arsenal                                 # → src/assets/arsenal.glb + editable .blend
+npm run model:projectiles                             # → src/assets/projectiles.glb + editable .blend
 npm run model:mining                                  # → src/assets/mining.glb + editable .blend
 node blender/run.mjs render.py preview.png --tier 3   # Cycles still with modules up to tier 3
 ```

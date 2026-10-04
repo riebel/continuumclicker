@@ -24,6 +24,7 @@ import {
   VISUAL_TIER_THRESHOLDS,
   WEAPON_COST_GROWTH,
   WEAPON_MAX_LEVEL,
+  WEAPON_SYSTEMS,
   WEAPONS,
   type WeaponDef,
   type WeaponId,
@@ -435,6 +436,8 @@ export function createAsteroid(
 }
 
 export interface Shot {
+  /** Coordinated mounted systems fired by this one player input. */
+  readonly salvo?: readonly Shot[]
   readonly weapon: WeaponId
   readonly special: string | null
   readonly damage: number
@@ -450,6 +453,77 @@ export interface Shot {
 
 export interface ShotResult extends Shot {
   readonly state: GameState
+}
+
+export type WeaponCharges = Record<WeaponId, number>
+
+export function createWeaponCharges(): WeaponCharges {
+  return { pulse: 0, plasma: 0, railgun: 0, tesla: 0, cryo: 0, swarm: 0, singularity: 0 }
+}
+
+/** One input fires every due installed system at the same acquired rock. */
+export function fireSalvo(
+  state: GameState,
+  charges: WeaponCharges,
+  random: () => number = Math.random,
+  options: { vein?: boolean; nextAsteroid?: Asteroid } = {},
+): ShotResult & { charges: WeaponCharges } {
+  const nextCharges = { ...charges }
+  const salvo: Shot[] = []
+  let current = state
+  let target = state.asteroid
+  // Auxiliary systems lead; the forward pulse fills the gaps between their cycles.
+  const systems = [
+    ...WEAPONS.filter((w) => w.id === 'singularity'),
+    ...WEAPONS.filter((w) => !['pulse', 'singularity'].includes(w.id)),
+    WEAPONS[0],
+  ]
+  for (const { id } of systems) {
+    const { cadence, phase } = WEAPON_SYSTEMS[id]
+    if (!state.weapons[id] || state.clicks % cadence !== phase) continue
+    const charge = nextCharges[id] ?? 0
+    nextCharges[id] = (charge + 1) % 12
+    if (target.hp <= 0) {
+      salvo.push({
+        weapon: id,
+        special: null,
+        damage: 0,
+        chained: 0,
+        gained: 0,
+        critical: false,
+        bonus: 0,
+        target,
+      })
+      continue
+    }
+    const result = fire({ ...current, activeWeapon: id, weaponCharge: charge }, random, options)
+    const { state: fired, ...shot } = result
+    target = shot.target
+    salvo.push(shot)
+    current = {
+      ...fired,
+      frozen: target.hp > 0 && (id === 'cryo' ? fired.frozen : current.frozen),
+    }
+  }
+  const leading = salvo.findLast((s) => s.damage > 0) ?? salvo[0]
+  return {
+    weapon: leading?.weapon ?? 'pulse',
+    salvo,
+    target,
+    damage: salvo.reduce((sum, s) => sum + s.damage, 0),
+    gained: salvo.reduce((sum, s) => sum + s.gained, 0),
+    bonus: salvo.reduce((sum, s) => sum + s.bonus, 0),
+    chained: salvo.reduce((sum, s) => sum + s.chained, 0),
+    critical: salvo.some((s) => s.critical),
+    special: salvo.find((s) => s.special)?.special ?? null,
+    charges: nextCharges,
+    state: {
+      ...current,
+      activeWeapon: state.activeWeapon,
+      weaponCharge: nextCharges.pulse,
+      clicks: state.clicks + 1,
+    },
+  }
 }
 
 /**
