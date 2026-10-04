@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   LASER_UPGRADES,
   type LaserUpgradeDef,
@@ -22,6 +23,7 @@ import {
 } from '../game/engine'
 import { formatNumber } from '../game/format'
 import { useActions, useGame } from '../game/store'
+import { Arsenal } from './Arsenal'
 import { cn } from './cn'
 
 /** Five pips: how many of this upgrade's ship modules are installed. */
@@ -172,11 +174,39 @@ const heading =
   'sticky top-0 z-10 flex items-baseline justify-between gap-3 border-y border-panel-line bg-space/85 px-4 py-3 text-sm font-bold tracking-widest uppercase backdrop-blur first:border-t-0'
 
 export function UpgradePanel() {
+  const [panel, setPanel] = useState<'reactors' | 'arsenal'>('reactors')
   return (
     <section
       aria-label="Upgrades"
       className="panel flex min-h-0 w-full flex-col overflow-hidden max-lg:max-h-[38dvh] lg:max-h-full"
     >
+      <nav
+        aria-label="Upgrade systems"
+        className="grid shrink-0 grid-cols-2 gap-1 border-b border-panel-line p-1.5"
+      >
+        <button
+          type="button"
+          aria-pressed={panel === 'reactors'}
+          onClick={() => setPanel('reactors')}
+          className={cn(
+            'cursor-pointer rounded-xl py-2 text-sm font-semibold transition-colors',
+            panel === 'reactors' ? 'bg-white/12 text-energy' : 'text-white/50 hover:bg-white/5',
+          )}
+        >
+          Reactors
+        </button>
+        <button
+          type="button"
+          aria-pressed={panel === 'arsenal'}
+          onClick={() => setPanel('arsenal')}
+          className={cn(
+            'cursor-pointer rounded-xl py-2 text-sm font-semibold transition-colors',
+            panel === 'arsenal' ? 'bg-white/12 text-crystal' : 'text-white/50 hover:bg-white/5',
+          )}
+        >
+          Arsenal <span className="ml-1 rounded bg-crystal/10 px-1.5 text-xs text-crystal">7</span>
+        </button>
+      </nav>
       <div className="scrollbar-thin min-h-0 overflow-y-auto">
         <h2 className={heading}>
           Mining laser
@@ -187,12 +217,26 @@ export function UpgradePanel() {
             <LaserRow key={upgrade.id} upgrade={upgrade} />
           ))}
         </ul>
-        <h2 className={heading}>Reactors</h2>
-        <ul className="divide-y divide-panel-line">
-          {UPGRADES.map((upgrade) => (
-            <UpgradeRow key={upgrade.id} upgrade={upgrade} />
-          ))}
-        </ul>
+        {panel === 'arsenal' ? (
+          <>
+            <h2 className={heading}>
+              Weapon arsenal{' '}
+              <span className="text-xs font-normal tracking-normal text-white/45 normal-case">
+                Equip one system
+              </span>
+            </h2>
+            <Arsenal />
+          </>
+        ) : (
+          <>
+            <h2 className={heading}>Reactors</h2>
+            <ul className="divide-y divide-panel-line">
+              {UPGRADES.map((upgrade) => (
+                <UpgradeRow key={upgrade.id} upgrade={upgrade} />
+              ))}
+            </ul>
+          </>
+        )}
       </div>
     </section>
   )

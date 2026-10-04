@@ -193,6 +193,92 @@ export const LASER_UPGRADES = [
 
 export type LaserUpgradeId = (typeof LASER_UPGRADES)[number]['id']
 
+/** Weapons share the laser's reactor scaling, but each has its own mining mechanic. */
+export const WEAPONS = [
+  {
+    id: 'pulse',
+    name: 'Pulse laser',
+    tag: 'Reliable',
+    color: '#ff934b',
+    baseCost: 0,
+    effect: 'One precise hit per shot. Your original mining laser.',
+    special: 'Pulse',
+  },
+  {
+    id: 'plasma',
+    name: 'Plasma devastator',
+    tag: 'Overcharge',
+    color: '#ff4e9a',
+    baseCost: 200,
+    effect: 'Every third shot detonates for 4 damage. Upgrades add +1 blast damage.',
+    special: 'Plasma detonation',
+  },
+  {
+    id: 'railgun',
+    name: 'Titan railgun',
+    tag: 'Piercing',
+    color: '#84ffbc',
+    baseCost: 1_200,
+    effect: 'Pierces for 2 damage, doubled against crystals. Upgrades add +1 damage.',
+    special: 'Crystal pierced',
+  },
+  {
+    id: 'tesla',
+    name: 'Tesla arc array',
+    tag: 'Chain lightning',
+    color: '#bb8bff',
+    baseCost: 6_000,
+    effect:
+      'On a kill, lightning hits the next rock for 2 damage, leaving at least 1 HP. Upgrades add +1 chain damage.',
+    special: 'Chain lightning',
+  },
+  {
+    id: 'cryo',
+    name: 'Cryo shatter beam',
+    tag: 'Freeze → shatter',
+    color: '#65eaff',
+    baseCost: 30_000,
+    effect:
+      'Freezes a rock, then shatters it for 3 damage and double energy. Upgrades add +1 shatter damage.',
+    special: 'Ice shatter',
+  },
+  {
+    id: 'swarm',
+    name: 'Hydra missile swarm',
+    tag: 'Multi-strike',
+    color: '#ffd567',
+    baseCost: 150_000,
+    effect: 'Three missiles per salvo, +10% crit chance. Upgrades add another missile.',
+    special: 'Missile salvo',
+  },
+  {
+    id: 'singularity',
+    name: 'Singularity projector',
+    tag: 'Event horizon',
+    color: '#798bff',
+    baseCost: 1_000_000,
+    effect:
+      'Every fourth shot collapses the entire asteroid for a triple break reward. Upgrades increase the reward.',
+    special: 'Event horizon',
+  },
+] as const
+
+export type WeaponId = (typeof WEAPONS)[number]['id']
+export type WeaponDef = (typeof WEAPONS)[number]
+export const WEAPON_MAX_LEVEL = 5
+export const WEAPON_COST_GROWTH = 4
+
+/** Combined module tiers reshape the whole silhouette, starting with the very first purchase. */
+export const SHIP_FORMS = [
+  { name: 'Scout', tiers: 0, detail: 'Compact mining vessel' },
+  { name: 'Interceptor', tiers: 1, detail: 'Deployable wings & engine pods' },
+  { name: 'Frigate', tiers: 4, detail: 'Armoured prow & expanded thrusters' },
+  { name: 'Destroyer', tiers: 9, detail: 'Outboard nacelles & reactor halo' },
+  { name: 'Battlecruiser', tiers: 16, detail: 'Command tower & heavy armour' },
+  { name: 'Dreadnought', tiers: 26, detail: 'Twin spinal rails & siege wings' },
+  { name: 'Star fortress', tiers: 40, detail: 'Orbital reactor rings & capital engines' },
+] as const
+
 /**
  * Rare ship modules found out in the sector. Only `MODULE_SLOTS` can be equipped at once, so
  * they are choices: fit the ship for mining, for travel or for idling.

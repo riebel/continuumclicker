@@ -13,6 +13,7 @@ import {
   MODULE_SLOTS,
   type ModuleId,
   PRODUCTION_MILESTONES,
+  SHIP_FORMS,
   SPEED_LEVELS,
   SPEED_OF_LIGHT_KMH,
   type SpeedLevelDef,
@@ -21,6 +22,11 @@ import {
   type UpgradeId,
   VISITS,
   VISUAL_TIER_THRESHOLDS,
+  WEAPON_COST_GROWTH,
+  WEAPON_MAX_LEVEL,
+  WEAPONS,
+  type WeaponDef,
+  type WeaponId,
 } from './content'
 import { distanceBetween, findSystem, HOME_ID, type StarSystem, sectorFor } from './sector'
 
@@ -53,6 +59,11 @@ export interface GameState {
   readonly speedLevel: number
   readonly owned: Readonly<Record<UpgradeId, number>>
   readonly lasers: Readonly<Record<LaserUpgradeId, number>>
+  readonly weapons: Readonly<Record<WeaponId, number>>
+  readonly activeWeapon: WeaponId
+  /** Charge and ice are local to the current weapon and target. */
+  readonly weaponCharge: number
+  readonly frozen: boolean
   /** The asteroid in the mining laser's sights. Not saved: a fresh one is found on load. */
   readonly asteroid: Asteroid
   readonly asteroidsMined: number
@@ -99,6 +110,13 @@ export function createInitialState(sectorSeed = 1): GameState {
       number
     >,
     asteroid: { kind: 'rock', hp: 4, maxHp: 4 },
+    weapons: Object.fromEntries(WEAPONS.map((w) => [w.id, w.id === 'pulse' ? 1 : 0])) as Record<
+      WeaponId,
+      number
+    >,
+    activeWeapon: 'pulse',
+    weaponCharge: 0,
+    frozen: false,
     asteroidsMined: 0,
     buffs: [],
     cometsCaught: 0,
@@ -136,6 +154,41 @@ export function visualTier(owned: number): number {
 /** Owned count at which the next module tier appears, or null when fully built. */
 export function nextVisualTierAt(owned: number): number | null {
   return VISUAL_TIER_THRESHOLDS.find((threshold) => owned < threshold) ?? null
+}
+
+export function shipModuleTiers(state: GameState): number {
+  return UPGRADES.reduce((sum, upgrade) => sum + visualTier(state.owned[upgrade.id]), 0)
+}
+
+export function shipForm(state: GameState): number {
+  const tiers = shipModuleTiers(state)
+  return Math.max(
+    0,
+    SHIP_FORMS.findLastIndex((form) => tiers >= form.tiers),
+  )
+}
+
+export function weaponCost(weapon: WeaponDef, level: number): number {
+  return weapon.baseCost * WEAPON_COST_GROWTH ** level
+}
+
+export function selectWeapon(state: GameState, id: WeaponId): GameState {
+  if (!WEAPONS.some((w) => w.id === id) || !state.weapons[id] || state.activeWeapon === id)
+    return state
+  return { ...state, activeWeapon: id, weaponCharge: 0, frozen: false }
+}
+
+export function buyWeapon(state: GameState, id: WeaponId): GameState {
+  const weapon = WEAPONS.find((w) => w.id === id)
+  if (!weapon || id === 'pulse' || state.weapons[id] >= WEAPON_MAX_LEVEL) return state
+  const cost = weaponCost(weapon, state.weapons[id])
+  if (state.energy < cost) return state
+  const next = {
+    ...state,
+    energy: state.energy - cost,
+    weapons: { ...state.weapons, [id]: state.weapons[id] + 1 },
+  }
+  return state.weapons[id] === 0 ? selectWeapon(next, id) : next
 }
 
 /** Output multiplier from production milestones reached by owning `owned` units. */
@@ -379,6 +432,10 @@ export function createAsteroid(
 }
 
 export interface Shot {
+  readonly weapon: WeaponId
+  readonly special: string | null
+  readonly damage: number
+  readonly chained: number
   /** Energy from the hit itself. */
   readonly gained: number
   readonly critical: boolean
@@ -402,22 +459,79 @@ export function fire(
   { vein = false }: { vein?: boolean } = {},
 ): ShotResult {
   const hit = hitEnergy(state) * kindMultiplier(state.asteroid.kind)
-  const critical = vein || random() < critChance(state)
-  const gained = critical ? hit * critMultiplier(state) : hit
-  const target = { ...state.asteroid, hp: state.asteroid.hp - 1 }
+  const weapon = state.activeWeapon
+  const level = state.weapons[weapon]
+  const charge = state.weaponCharge + 1
+  let damage = 1
+  let multiplier = 1
+  let bonusMultiplier = 1
+  let special: string | null = null
+  let frozen = false
+  switch (weapon) {
+    case 'plasma':
+      if (charge % 3 === 0) {
+        damage = 3 + level
+        special = 'Plasma detonation'
+      }
+      break
+    case 'railgun':
+      damage = 1 + level
+      if (state.asteroid.kind === 'crystal') {
+        damage *= 2
+        special = 'Crystal pierced'
+      }
+      break
+    case 'cryo':
+      if (state.frozen) {
+        damage = 2 + level
+        multiplier = 2
+        special = 'Ice shatter'
+      } else {
+        frozen = true
+        special = 'Target frozen'
+      }
+      break
+    case 'swarm':
+      damage = 2 + level
+      special = `${damage} missile salvo`
+      break
+    case 'singularity':
+      if (charge % 4 === 0) {
+        damage = state.asteroid.hp
+        bonusMultiplier = 2 + level
+        special = 'Event horizon'
+      }
+      break
+  }
+  damage = Math.min(state.asteroid.hp, damage)
+  const critical =
+    vein || random() < Math.min(1, critChance(state) + (weapon === 'swarm' ? 0.1 : 0))
+  const gained = hit * damage * multiplier * (critical ? critMultiplier(state) : 1)
+  const target = { ...state.asteroid, hp: state.asteroid.hp - damage }
   const broken = target.hp <= 0
-  const bonus = broken ? hit * target.maxHp * breakBonus(state) : 0
-  const earned = gained + bonus
+  let bonus = broken ? hit * target.maxHp * breakBonus(state) * bonusMultiplier : 0
+  let chained = 0
   let next = target
   if (broken) {
     next = createAsteroid(random, crystalChance(state))
+    if (weapon === 'tesla') {
+      chained = Math.min(next.hp - 1, 1 + level)
+      next = { ...next, hp: next.hp - chained }
+      bonus += hitEnergy(state) * kindMultiplier(next.kind) * chained
+      special = 'Chain lightning'
+    }
     // A chain laser cracks the next asteroid as the last one breaks.
     if (hasModule(state, 'chain-laser')) {
       next = { ...next, hp: Math.max(1, next.hp - MODULE_EFFECTS.chainLaserDamage) }
     }
   }
+  const earned = gained + bonus
 
   return {
+    weapon,
+    special,
+    damage,
+    chained,
     gained,
     critical,
     bonus,
@@ -428,6 +542,8 @@ export function fire(
       lifetimeEnergy: state.lifetimeEnergy + earned,
       clicks: state.clicks + 1,
       asteroid: next,
+      weaponCharge: charge % 12,
+      frozen: !broken && frozen,
       asteroidsMined: state.asteroidsMined + (broken ? 1 : 0),
     },
   }

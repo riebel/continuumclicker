@@ -42,9 +42,7 @@ describe('game store', () => {
     const store = createGameStore(memoryStorage(), 0)
     store.setState((s) => ({ game: { ...s.game, energy: 1000 } }))
     store.getState().actions.buy('avidyne-engine')
-    expect(store.getState().notices.at(-1)?.title).toBe(
-      'Ship upgraded: Avidyne engine module 1/5 installed',
-    )
+    expect(store.getState().notices.at(-1)?.title).toBe('Ship transformed: Interceptor')
     const count = store.getState().notices.length
     store.getState().actions.buy('avidyne-engine')
     expect(store.getState().notices).toHaveLength(count)

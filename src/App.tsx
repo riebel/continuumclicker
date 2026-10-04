@@ -6,6 +6,7 @@ import { Menu } from './ui/Menu'
 import { Notices } from './ui/Notices'
 import { SectorMapButton } from './ui/SectorMap'
 import { ShipStage, supportsWebGL } from './ui/ShipStage'
+import { ShipStatus } from './ui/ShipStatus'
 import { SpeedPanel } from './ui/SpeedPanel'
 import { type SceneState, Stage } from './ui/Stage'
 import { UpgradePanel } from './ui/UpgradePanel'
@@ -50,6 +51,7 @@ export function App() {
           <div className="flex min-h-0 w-full flex-1 items-center justify-center [container-type:size]">
             <Stage ref={shipRef} scene={scene} />
           </div>
+          <ShipStatus />
           <FlightReadout />
         </section>
 

@@ -7,9 +7,12 @@ import {
   MODULE_EFFECTS,
   MODULES,
   type ModuleId,
+  SHIP_FORMS,
   SPEED_LEVELS,
   UPGRADES,
   type UpgradeId,
+  WEAPONS,
+  type WeaponId,
 } from './content'
 import {
   type Arrival,
@@ -17,6 +20,7 @@ import {
   buyLaser,
   buyModule,
   buyUpgrade,
+  buyWeapon,
   type CometReward,
   catchComet,
   createInitialState,
@@ -30,7 +34,9 @@ import {
   jumpSector,
   milestoneMultiplier,
   type Shot,
+  selectWeapon,
   setCourse,
+  shipForm,
   unequip,
   visualTier,
 } from './engine'
@@ -97,6 +103,8 @@ export interface GameStore {
     jump(): void
     buy(id: UpgradeId): void
     buyLaser(id: LaserUpgradeId): void
+    buyWeapon(id: WeaponId): void
+    selectWeapon(id: WeaponId): void
     engage(speedLevel: number): void
     save(options?: { announce?: boolean; now?: number }): void
     reset(): void
@@ -279,6 +287,7 @@ export function createGameStore(
 
         buy(id) {
           get().actions.tick()
+          const beforeForm = shipForm(get().game)
           const before = get().game.owned[id]
           set((s) => ({ game: buyUpgrade(s.game, id) }))
           const after = get().game.owned[id]
@@ -287,10 +296,26 @@ export function createGameStore(
           const boosted = milestoneMultiplier(after) > milestoneMultiplier(before)
           const boost = boosted ? `${name} output doubled.` : undefined
           if (tier > visualTier(before)) {
+            const form = shipForm(get().game)
             notify({
               kind: 'success',
-              title: `Ship upgraded: ${name} module ${tier}/5 installed`,
-              ...(boost && { message: boost }),
+              title:
+                form > beforeForm
+                  ? `Ship transformed: ${SHIP_FORMS[form]?.name}`
+                  : `Ship upgraded: ${name} module ${tier}/5 installed`,
+              ...(form > beforeForm
+                ? {
+                    message: [
+                      SHIP_FORMS[form]?.detail,
+                      `${name} module ${tier}/5 installed.`,
+                      boost,
+                    ]
+                      .filter(Boolean)
+                      .join(' '),
+                  }
+                : boost
+                  ? { message: boost }
+                  : {}),
             })
           } else if (boost) {
             notify({ kind: 'success', title: boost })
@@ -300,6 +325,22 @@ export function createGameStore(
         buyLaser(id) {
           get().actions.tick()
           set((s) => ({ game: buyLaser(s.game, id) }))
+        },
+
+        buyWeapon(id) {
+          get().actions.tick()
+          const before = get().game
+          const game = buyWeapon(before, id)
+          if (game === before) return
+          set({ game })
+          notify({
+            kind: 'success',
+            title: `${WEAPONS.find((w) => w.id === id)?.name} ${before.weapons[id] === 0 ? 'installed' : `upgraded to L${game.weapons[id]}`}`,
+          })
+        },
+
+        selectWeapon(id) {
+          set((s) => ({ game: selectWeapon(s.game, id) }))
         },
 
         engage(speedLevel) {

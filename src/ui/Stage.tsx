@@ -18,7 +18,7 @@ import { cn } from './cn'
 
 export type SceneState = 'loading' | 'ready' | 'unavailable'
 
-type Tone = 'hit' | 'crit' | 'crystal' | 'bonus' | 'comet'
+type Tone = 'hit' | 'crit' | 'crystal' | 'bonus' | 'comet' | 'special'
 
 interface Popup {
   id: number
@@ -34,6 +34,7 @@ interface Popup {
 const MAX_POPUPS = 40
 
 const TONES: Record<Tone, string> = {
+  special: 'text-sm font-bold tracking-widest text-crystal uppercase whitespace-nowrap not-italic',
   hit: 'text-2xl font-bold text-white',
   crystal: 'text-3xl font-bold text-crystal',
   crit: 'text-5xl font-black text-energy',
@@ -202,6 +203,16 @@ export function Stage({ ref, scene }: StageProps) {
     const tone = shot.critical ? 'crit' : shot.target.kind === 'crystal' ? 'crystal' : 'hit'
     const added = [popup(shot.gained, tone)]
     if (shot.bonus > 0) added.push({ ...popup(shot.bonus, 'bonus'), x, driftX: 0 })
+    if (shot.special)
+      added.push({
+        ...popup(0, 'crystal'),
+        text: shot.special,
+        x,
+        y: y - radius - 20,
+        driftX: 0,
+        duration: 1,
+        tone: 'special',
+      })
     show(...added)
   }
 

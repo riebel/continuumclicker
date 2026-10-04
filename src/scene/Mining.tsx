@@ -19,12 +19,14 @@ import {
   TetrahedronGeometry,
   Vector3,
 } from 'three'
+import { WEAPONS, type WeaponId } from '../game/content'
 import type { AsteroidKind, Shot } from '../game/engine'
 import { mulberry32 } from '../game/random'
 import { gameStore } from '../game/store'
 import { ASTEROID_LAYOUT, HEADING, layoutPosition, stageBox } from './constants'
 import { createRockGeometry, createRockMaterial, crystalTransforms } from './rock'
 import { asteroidOnScreen } from './target'
+import { WeaponEffects } from './WeaponEffects'
 
 const CRYSTALS = 11
 const SPARKS = 90
@@ -194,6 +196,8 @@ export function Mining({ anchor, bow, reducedMotion }: MiningProps) {
       flash: 0,
       damage: 0,
       beamAge: Number.POSITIVE_INFINITY,
+      weapon: 'pulse' as WeaponId,
+      beamWidth: 1,
       burstAge: Number.POSITIVE_INFINITY,
       burstSize: 1,
       burstAt: new Vector3(),
@@ -271,7 +275,25 @@ export function Mining({ anchor, bow, reducedMotion }: MiningProps) {
         .addScaledVector(sim.v, sim.radius * 0.8)
         .add(sim.w)
       sim.beamAge = 0
-      const color = shot.critical ? CRIT_COLOR : kind === 'crystal' ? CRYSTAL_COLOR : LASER_COLOR
+      sim.weapon = shot.weapon
+      sim.beamWidth =
+        shot.weapon === 'railgun'
+          ? 0.45
+          : shot.weapon === 'singularity'
+            ? 2
+            : shot.weapon === 'cryo'
+              ? 1.4
+              : shot.special
+                ? 1.8
+                : 1
+      const color =
+        shot.weapon !== 'pulse'
+          ? new Color(WEAPONS.find((w) => w.id === shot.weapon)?.color).multiplyScalar(3)
+          : shot.critical
+            ? CRIT_COLOR
+            : kind === 'crystal'
+              ? CRYSTAL_COLOR
+              : LASER_COLOR
       assets.beamMaterial.color.copy(color)
       assets.impactMaterial.color.copy(color)
       assets.sparkMaterial.color.copy(color)
@@ -341,12 +363,23 @@ export function Mining({ anchor, bow, reducedMotion }: MiningProps) {
     sim.damage += (targetDamage - sim.damage) * Math.min(1, dt * 12)
     sim.flash = Math.max(0, sim.flash - dt * 10)
     assets.rockMaterial.uniforms.uDamage.value = sim.damage
+    assets.rockMaterial.uniforms.uCrackColor.value.copy(
+      game.frozen
+        ? CRYSTAL_COLOR
+        : game.asteroid.kind === 'crystal'
+          ? CRYSTAL_COLOR
+          : new Color(4, 1.3, 0.35),
+    )
     assets.rockMaterial.uniforms.uFlash.value = sim.flash * 0.25
     assets.crystalMaterial.emissiveIntensity = 2.4 + sim.flash * 4 + Math.sin(now * 3) * 0.4
 
     // Laser beam from the bow to the hit point.
     sim.beamAge += dt
-    const beamOn = sim.beamAge < BEAM_SECONDS
+    const beamOn =
+      sim.beamAge < BEAM_SECONDS &&
+      sim.weapon !== 'swarm' &&
+      sim.weapon !== 'plasma' &&
+      sim.weapon !== 'tesla'
     for (const [ref, width] of [
       [beam, 0.03],
       [beamCore, 0.01],
@@ -359,7 +392,7 @@ export function Mining({ anchor, bow, reducedMotion }: MiningProps) {
       sim.w.copy(sim.hit).sub(bow)
       m.position.copy(bow).addScaledVector(sim.w, 0.5)
       m.quaternion.setFromUnitVectors(sim.v.set(0, 0, 1), sim.dir.copy(sim.w).normalize())
-      const w = box.size * width * (0.4 + 0.6 * fade)
+      const w = box.size * width * sim.beamWidth * (0.4 + 0.6 * fade)
       m.scale.set(w, w, sim.w.length())
     }
     assets.beamMaterial.opacity = assets.coreMaterial.opacity = 1 - sim.beamAge / BEAM_SECONDS
@@ -471,6 +504,7 @@ export function Mining({ anchor, bow, reducedMotion }: MiningProps) {
       <sprite ref={impact} material={assets.impactMaterial} visible={false} />
       <sprite ref={burst} material={assets.burstMaterial} visible={false} />
       <pointLight ref={light} decay={2} intensity={0} />
+      <WeaponEffects bow={bow} target={sim.hit} asteroid={sim} reducedMotion={reducedMotion} />
     </>
   )
 }

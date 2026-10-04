@@ -9,6 +9,8 @@ import {
   SPEED_LEVELS,
   SPEED_OF_LIGHT_KMH,
   UPGRADES,
+  WEAPON_MAX_LEVEL,
+  WEAPONS,
 } from './content'
 import { type Buff, createInitialState, type GameState } from './engine'
 import { findSystem, HOME_ID, newSectorSeed, sectorFor } from './sector'
@@ -33,6 +35,8 @@ const saveSchema = z.object({
   owned: z.record(z.string(), count),
   // Added with asteroid mining; older version 3 saves lack them.
   lasers: z.optional(z.record(z.string(), count)),
+  weapons: z.optional(z.record(z.string(), count)),
+  activeWeapon: z.optional(z.string()),
   asteroidsMined: z.optional(count),
   // Added with comets.
   buffs: z.optional(z.array(z.object({ kind: z.string(), remaining: amount }))),
@@ -87,6 +91,8 @@ export function toSaveData(state: GameState, savedAt: number): SaveData {
     speedLevel: SPEED_LEVELS[state.speedLevel]?.id ?? 'stop',
     owned: { ...state.owned },
     lasers: { ...state.lasers },
+    weapons: { ...state.weapons },
+    activeWeapon: state.activeWeapon,
     asteroidsMined: state.asteroidsMined,
     buffs: state.buffs.map(({ kind, remaining }) => ({ kind, remaining })),
     cometsCaught: state.cometsCaught,
@@ -149,6 +155,13 @@ export function fromSaveData(data: SaveData): LoadedGame {
     const { maxLevel = Number.POSITIVE_INFINITY }: LaserUpgradeDef = upgrade
     lasers[upgrade.id] = Math.min(data.lasers?.[upgrade.id] ?? 0, maxLevel)
   }
+  const weapons = { ...initial.weapons }
+  for (const weapon of WEAPONS) {
+    if (weapon.id !== 'pulse')
+      weapons[weapon.id] = Math.min(data.weapons?.[weapon.id] ?? 0, WEAPON_MAX_LEVEL)
+  }
+  const activeWeapon =
+    WEAPONS.find((w) => w.id === data.activeWeapon && weapons[w.id] > 0)?.id ?? 'pulse'
 
   return {
     savedAt: data.savedAt,
@@ -162,6 +175,8 @@ export function fromSaveData(data: SaveData): LoadedGame {
       ),
       owned,
       lasers,
+      weapons,
+      activeWeapon,
       asteroidsMined: data.asteroidsMined ?? 0,
       buffs: loadBuffs(data.buffs),
       cometsCaught: data.cometsCaught ?? 0,

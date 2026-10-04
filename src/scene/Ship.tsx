@@ -13,10 +13,11 @@ import {
 } from 'three'
 import shipUrl from '../assets/ship.glb?url'
 import { UPGRADES } from '../game/content'
-import { visualTier, warpIntensity } from '../game/engine'
+import { shipForm, visualTier, warpIntensity } from '../game/engine'
 import { gameStore, useGame } from '../game/store'
 import { HEADING, layoutPosition, SHIP_LAYOUT, SHIP_ORIENTATION, stageBox } from './constants'
 import { attachPlume, disposePlume, type NozzleKind, type Plume, updatePlume } from './plume'
+import { ShipEvolution } from './ShipEvolution'
 
 interface ModuleNode {
   readonly node: Object3D
@@ -37,6 +38,7 @@ interface PreparedShip {
   readonly plumes: Plume[]
   readonly center: Vector3
   readonly radius: number
+  readonly length: number
   readonly engineGlow: MeshStandardMaterial[]
   readonly reactor: MeshStandardMaterial[]
 }
@@ -101,6 +103,7 @@ function prepare(scene: Group): PreparedShip {
     plumes,
     center,
     radius,
+    length: bounds.max.x - bounds.min.x,
     engineGlow: byName('EngineGlow'),
     reactor: byName('Reactor'),
   }
@@ -126,12 +129,18 @@ interface ShipProps {
 }
 
 export function Ship({ anchor, bow, reducedMotion }: ShipProps) {
-  const { scene } = useGLTF(shipUrl, false, true)
-  const ship = useMemo(() => prepare(scene), [scene])
+  const { scene: template } = useGLTF(shipUrl, false, true)
+  // Keep the cached glTF untouched: remounts must not accumulate exhausts or bow markers.
+  const { scene, ship } = useMemo(() => {
+    const scene = template.clone(true)
+    return { scene, ship: prepare(scene) }
+  }, [template])
   const tiers = useTiers()
   const root = useRef<Group>(null)
+  const muzzle = useRef<Object3D>(null)
   const light = useRef<PointLight>(null)
   const throttle = useRef(0)
+  const evolution = useRef(-1)
   const mounted = useRef(false)
   const temp = useMemo(() => ({ v: new Vector3(), sum: new Vector3(), pivot: new Vector3() }), [])
 
@@ -143,6 +152,11 @@ export function Ship({ anchor, bow, reducedMotion }: ShipProps) {
       const visible = m.tier <= (tiers[m.module] ?? 0)
       if (visible && !m.node.visible) m.installedAt = mounted.current ? now : 0
       m.node.visible = visible
+      if (!visible) {
+        m.installedAt = 0
+        m.node.position.copy(m.position)
+        m.node.scale.copy(m.scale)
+      }
     }
     mounted.current = true
   }, [ship, tiers])
@@ -159,7 +173,13 @@ export function Ship({ anchor, bow, reducedMotion }: ShipProps) {
     const size = box.size * SHIP_LAYOUT.size
     layoutPosition(box, SHIP_LAYOUT, group.position)
     if (!reducedMotion) group.position.y += Math.sin(time * 0.6) * 0.015 * size
-    group.scale.setScalar((size / (2 * ship.radius)) * 1.2)
+    const form = shipForm(gameStore.getState().game)
+    const targetEvolution = form / 6
+    evolution.current =
+      reducedMotion || evolution.current < 0
+        ? targetEvolution
+        : evolution.current + (targetEvolution - evolution.current) * Math.min(1, dt * 3)
+    group.scale.setScalar((size / (2 * ship.radius)) * (1.05 - evolution.current * 0.2))
 
     // Gentle drift and parallax towards the pointer.
     const sway = reducedMotion ? 0 : 1
@@ -196,13 +216,14 @@ export function Ship({ anchor, bow, reducedMotion }: ShipProps) {
     }
 
     group.updateMatrixWorld()
-    ship.bow.getWorldPosition(bow)
+    const emitter = muzzle.current ?? ship.bow
+    emitter.getWorldPosition(bow)
 
     // Newly installed modules grow into place from their own centre.
     const now = performance.now()
     for (const m of ship.modules) {
       if (!m.installedAt) continue
-      const t = Math.min(1, (now - m.installedAt) / INSTALL_MS)
+      const t = reducedMotion ? 1 : Math.min(1, (now - m.installedAt) / INSTALL_MS)
       const k = Math.max(0.001, easeOutBack(t))
       temp.pivot.copy(m.pivot)
       m.node.position
@@ -217,6 +238,7 @@ export function Ship({ anchor, bow, reducedMotion }: ShipProps) {
     <>
       <group ref={root}>
         <primitive object={scene} position={ship.center.clone().negate()} />
+        <ShipEvolution length={ship.length} muzzle={muzzle} reducedMotion={reducedMotion} />
       </group>
       <pointLight ref={light} color="#ffb45a" decay={2} />
     </>

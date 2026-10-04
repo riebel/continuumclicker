@@ -15,6 +15,17 @@ Warp 9.9999. Installable as an offline-capable PWA.
   and 50 owned): extra engines, generator bands, coils, capacitor banks, sensors, decks, manoeuvring
   jets, field-matrix conduits, nacelles, an exposed reactor core and finally turrets and a spinal
   cannon. The dots next to each upgrade show how many are installed.
+- **The arsenal** adds six unlockable weapons alongside the pulse laser: an overcharging plasma
+  cannon, a crystal-piercing railgun, Tesla chain lightning, a freeze-and-shatter cryo beam,
+  missile salvos and a singularity that collapses an asteroid. Each has five upgrade levels.
+  Select the Arsenal tab to unlock or improve a weapon; switch weapons in the ship status panel.
+  All weapons benefit from your laser upgrades. Hold the ship button to keep firing.
+- **Ship transformations** start with your first reactor upgrade. Combined module tiers unlock
+  seven hull forms: Scout, Interceptor, Frigate, Destroyer, Battlecruiser, Dreadnought and Star
+  fortress. Swept wings, engine pods, armour, command decks, spinal rails and reactor rings deploy
+  around the hull, and the active weapon gets its own visible mount and shot effects. The refit
+  bar below the ship shows progress toward the next form. Weapons and selection persist in saves;
+  existing saves automatically receive the pulse laser.
 - **The helm** sets your speed. Every level drains energy per second:
   - *white*: your reactors cover the drain, you can cruise forever,
   - *orange*: it drains your reserves; when they run dry the ship automatically drops to the

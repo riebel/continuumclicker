@@ -102,6 +102,21 @@ describe('App', () => {
     expect(screen.getAllByText('Ship module 1 of 5, next at 5 owned')).toHaveLength(1)
   })
 
+  it('unlocks, equips and switches between weapons', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    setEnergy(500)
+    await user.click(screen.getByRole('button', { name: /Arsenal 7/i }))
+    await user.click(screen.getByRole('button', { name: /Unlock.*Plasma devastator/i }))
+    expect(gameStore.getState().game.weapons.plasma).toBe(1)
+    expect(screen.getByLabelText('Active weapon')).toHaveValue('plasma')
+    await user.click(screen.getByRole('button', { name: /fire the mining laser/i }))
+    expect(gameStore.getState().lastShot?.weapon).toBe('plasma')
+    await user.selectOptions(screen.getByLabelText('Active weapon'), 'pulse')
+    expect(gameStore.getState().game.activeWeapon).toBe('pulse')
+    expect(gameStore.getState().game.weaponCharge).toBe(0)
+  })
+
   it('engages a speed level', async () => {
     const user = userEvent.setup()
     render(<App />)
