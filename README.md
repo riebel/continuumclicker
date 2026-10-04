@@ -85,6 +85,7 @@ src/
   App.tsx       Layout
 blender/
   build_ship.py Procedural, modular ship model → glTF
+  build_refits.py Blender hull transformations and detailed weapon assemblies → glTF
   render.py     Cycles stills: PWA icons and the no-WebGL fallback poster
   run.mjs       Runs those scripts with a locally installed Blender
 ```
@@ -103,6 +104,14 @@ tier as a separate object, bakes ambient occlusion into vertex colours and expor
 module object carries `{"module": <upgrade id>, "tier": 1-5}` in its glTF extras; empties marked
 `{"nozzle": …, "radius": …}` locate the engine exhausts.
 
+`blender/build_refits.py` shares the original modelling tools and metal palette to build six
+cumulative hull refits and seven weapon assemblies. Curved armour, cooling collars, bores,
+hydraulics and recessed emitters are geometry, with ambient occlusion baked per installation
+stage into vertex colours. The exported `refits.glb` uses `form`, `weapon`, `weaponTier` and
+`muzzle` extras to select assemblies and place shot effects. Both assets share ship coordinates
+and the same installation animation. The build also saves an editable Blender scene at
+`blender/build/refits.raw.blend`.
+
 The engines really glow: the throats are emissive geometry and the exhaust plumes are shaders
 (hot core, taper, flicker, Mach diamonds at high thrust), both brighter than 1.0 so the HDR bloom
 pass picks them up, and a point light at the engine cluster lights the hull. Thrust follows the
@@ -114,6 +123,7 @@ To change the model, edit the script and rebuild with [Blender](https://www.blen
 
 ```sh
 npm run model                                         # → src/assets/ship.glb (meshopt compressed)
+npm run model:refits                                  # → src/assets/refits.glb + editable .blend
 node blender/run.mjs render.py preview.png --tier 3   # Cycles still with modules up to tier 3
 ```
 

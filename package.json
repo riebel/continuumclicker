@@ -23,7 +23,8 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "check": "npm run lint && npm run typecheck && npm run test",
-    "model": "node blender/run.mjs build_ship.py && gltf-transform meshopt blender/build/ship.raw.glb src/assets/ship.glb"
+    "model": "node blender/run.mjs build_ship.py && gltf-transform meshopt blender/build/ship.raw.glb src/assets/ship.glb",
+    "model:refits": "node blender/run.mjs build_refits.py && gltf-transform meshopt blender/build/refits.raw.glb src/assets/refits.glb"
   },
   "dependencies": {
     "@fontsource-variable/source-sans-3": "^5.3.0",

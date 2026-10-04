@@ -33,7 +33,16 @@ if (!script) {
 const here = dirname(fileURLToPath(import.meta.url))
 const result = spawnSync(
   findBlender(),
-  ['--background', '--factory-startup', '--python', join(here, script), '--', ...args],
+  [
+    '--background',
+    '--factory-startup',
+    '--python-exit-code',
+    '1',
+    '--python',
+    join(here, script),
+    '--',
+    ...args,
+  ],
   { stdio: 'inherit' },
 )
 if (result.error) {

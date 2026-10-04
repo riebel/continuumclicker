@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber'
 import { type RefObject, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import {
   Box3,
-  type Group,
+  Group,
   type Material,
   type Mesh,
   MeshStandardMaterial,
@@ -11,17 +11,19 @@ import {
   type PointLight,
   Vector3,
 } from 'three'
+import refitsUrl from '../assets/refits.glb?url'
 import shipUrl from '../assets/ship.glb?url'
 import { UPGRADES } from '../game/content'
 import { shipForm, visualTier, warpIntensity } from '../game/engine'
 import { gameStore, useGame } from '../game/store'
 import { HEADING, layoutPosition, SHIP_LAYOUT, SHIP_ORIENTATION, stageBox } from './constants'
 import { attachPlume, disposePlume, type NozzleKind, type Plume, updatePlume } from './plume'
-import { ShipEvolution } from './ShipEvolution'
 
 interface ModuleNode {
   readonly node: Object3D
-  readonly module: string
+  readonly module: string | undefined
+  readonly form: number | undefined
+  readonly weapon: string | undefined
   readonly tier: number
   readonly position: Vector3
   readonly scale: Vector3
@@ -35,10 +37,10 @@ interface PreparedShip {
   /** Marker at the tip of the bow, where the mining laser fires from. */
   readonly bow: Object3D
   readonly modules: ModuleNode[]
+  readonly muzzles: Map<string, Object3D>
   readonly plumes: Plume[]
   readonly center: Vector3
   readonly radius: number
-  readonly length: number
   readonly engineGlow: MeshStandardMaterial[]
   readonly reactor: MeshStandardMaterial[]
 }
@@ -54,24 +56,34 @@ function prepare(scene: Group): PreparedShip {
   const radius = bounds.getSize(new Vector3()).length() / 2
 
   const modules: ModuleNode[] = []
+  const muzzles = new Map<string, Object3D>()
   const plumes: Plume[] = []
-  const materials = new Map<string, MeshStandardMaterial>()
+  const materials = new Set<MeshStandardMaterial>()
 
   scene.traverse((object) => {
     const data = object.userData as {
       module?: string
       tier?: number
+      form?: number
+      weapon?: string
+      weaponTier?: number
+      muzzle?: string
       nozzle?: NozzleKind
       radius?: number
     }
-    if (data.module && data.tier) {
+    if (data.muzzle) muzzles.set(data.muzzle, object)
+    if ((data.module && data.tier) || data.form || data.weapon) {
+      const pivot = new Box3().setFromObject(object).getCenter(new Vector3())
+      object.parent?.worldToLocal(pivot)
       modules.push({
         node: object,
         module: data.module,
-        tier: data.tier,
+        tier: data.tier ?? data.weaponTier ?? 0,
+        form: data.form,
+        weapon: data.weapon,
         position: object.position.clone(),
         scale: object.scale.clone(),
-        pivot: new Box3().setFromObject(object).getCenter(new Vector3()),
+        pivot,
         installedAt: 0,
       })
     }
@@ -79,14 +91,16 @@ function prepare(scene: Group): PreparedShip {
     const mesh = object as Mesh
     if (mesh.isMesh) {
       for (const material of ([] as Material[]).concat(mesh.material)) {
-        if (material instanceof MeshStandardMaterial) materials.set(material.name, material)
+        if (material instanceof MeshStandardMaterial) materials.add(material)
       }
     }
   })
 
-  for (const [name, material] of materials) {
+  for (const material of materials) {
+    const name = material.name
     const base = EMISSIVE_BASE[name]
     if (base !== undefined) material.emissiveIntensity = base
+    if (name.startsWith('Weapon-')) material.emissiveIntensity = 1.8
     // Hull metals rely on the environment map for their sheen.
     if (!(name in EMISSIVE_BASE) && name !== 'EngineGlow') material.envMapIntensity = 1.2
   }
@@ -96,14 +110,14 @@ function prepare(scene: Group): PreparedShip {
   bow.position.set(bounds.max.x, center.y, center.z)
   scene.add(bow)
 
-  const byName = (name: string) => [...materials.values()].filter((m) => m.name === name)
+  const byName = (name: string) => [...materials].filter((m) => m.name === name)
   return {
     bow,
     modules,
+    muzzles,
     plumes,
     center,
     radius,
-    length: bounds.max.x - bounds.min.x,
     engineGlow: byName('EngineGlow'),
     reactor: byName('Reactor'),
   }
@@ -130,17 +144,21 @@ interface ShipProps {
 
 export function Ship({ anchor, bow, reducedMotion }: ShipProps) {
   const { scene: template } = useGLTF(shipUrl, false, true)
+  const { scene: refits } = useGLTF(refitsUrl, false, true)
   // Keep the cached glTF untouched: remounts must not accumulate exhausts or bow markers.
   const { scene, ship } = useMemo(() => {
-    const scene = template.clone(true)
+    const scene = new Group()
+    scene.add(template.clone(true), refits.clone(true))
     return { scene, ship: prepare(scene) }
-  }, [template])
+  }, [template, refits])
   const tiers = useTiers()
+  const form = useGame((s) => shipForm(s.game))
+  const weapon = useGame((s) => s.game.activeWeapon)
+  const weaponLevel = useGame((s) => s.game.weapons[s.game.activeWeapon] ?? 1)
   const root = useRef<Group>(null)
-  const muzzle = useRef<Object3D>(null)
   const light = useRef<PointLight>(null)
   const throttle = useRef(0)
-  const evolution = useRef(-1)
+  const recoil = useRef({ shot: 0, kick: 0 })
   const mounted = useRef(false)
   const temp = useMemo(() => ({ v: new Vector3(), sum: new Vector3(), pivot: new Vector3() }), [])
 
@@ -149,7 +167,11 @@ export function Ship({ anchor, bow, reducedMotion }: ShipProps) {
   useLayoutEffect(() => {
     const now = performance.now()
     for (const m of ship.modules) {
-      const visible = m.tier <= (tiers[m.module] ?? 0)
+      const visible = m.form
+        ? m.form <= form
+        : m.weapon
+          ? m.weapon === weapon && m.tier <= weaponLevel
+          : m.tier <= (tiers[m.module ?? ''] ?? 0)
       if (visible && !m.node.visible) m.installedAt = mounted.current ? now : 0
       m.node.visible = visible
       if (!visible) {
@@ -159,7 +181,7 @@ export function Ship({ anchor, bow, reducedMotion }: ShipProps) {
       }
     }
     mounted.current = true
-  }, [ship, tiers])
+  }, [ship, tiers, form, weapon, weaponLevel])
 
   useFrame((state, delta) => {
     const group = root.current
@@ -167,19 +189,19 @@ export function Ship({ anchor, bow, reducedMotion }: ShipProps) {
     if (!group || !element) return
     const dt = Math.min(delta, 0.1)
     const time = state.clock.elapsedTime
+    const latest = gameStore.getState().lastShot
+    if (latest && latest.id !== recoil.current.shot) {
+      recoil.current.shot = latest.id
+      recoil.current.kick = latest.damage > 0 && !reducedMotion ? 1 : 0
+    }
+    recoil.current.kick *= Math.exp(-dt * 18)
 
     // Fit the ship into its spot in the anchor element's box.
     const box = stageBox(element.getBoundingClientRect(), state.size)
     const size = box.size * SHIP_LAYOUT.size
     layoutPosition(box, SHIP_LAYOUT, group.position)
     if (!reducedMotion) group.position.y += Math.sin(time * 0.6) * 0.015 * size
-    const form = shipForm(gameStore.getState().game)
-    const targetEvolution = form / 6
-    evolution.current =
-      reducedMotion || evolution.current < 0
-        ? targetEvolution
-        : evolution.current + (targetEvolution - evolution.current) * Math.min(1, dt * 3)
-    group.scale.setScalar((size / (2 * ship.radius)) * (1.05 - evolution.current * 0.2))
+    group.scale.setScalar((size / (2 * ship.radius)) * 1.18)
 
     // Gentle drift and parallax towards the pointer.
     const sway = reducedMotion ? 0 : 1
@@ -215,30 +237,31 @@ export function Ship({ anchor, bow, reducedMotion }: ShipProps) {
       light.current.distance = size * 2.5
     }
 
-    group.updateMatrixWorld()
-    const emitter = muzzle.current ?? ship.bow
-    emitter.getWorldPosition(bow)
-
     // Newly installed modules grow into place from their own centre.
     const now = performance.now()
     for (const m of ship.modules) {
-      if (!m.installedAt) continue
-      const t = reducedMotion ? 1 : Math.min(1, (now - m.installedAt) / INSTALL_MS)
-      const k = Math.max(0.001, easeOutBack(t))
-      temp.pivot.copy(m.pivot)
-      m.node.position
-        .copy(temp.pivot)
-        .sub(temp.v.copy(temp.pivot).sub(m.position).multiplyScalar(k))
-      m.node.scale.copy(m.scale).multiplyScalar(k)
-      if (t >= 1) m.installedAt = 0
+      if (m.weapon) m.node.position.copy(m.position)
+      if (m.installedAt) {
+        const t = reducedMotion ? 1 : Math.min(1, (now - m.installedAt) / INSTALL_MS)
+        const k = Math.max(0.001, easeOutBack(t))
+        temp.pivot.copy(m.pivot)
+        m.node.position
+          .copy(temp.pivot)
+          .sub(temp.v.copy(temp.pivot).sub(m.position).multiplyScalar(k))
+        m.node.scale.copy(m.scale).multiplyScalar(k)
+        if (t >= 1) m.installedAt = 0
+      }
+      if (m.weapon && m.node.visible) m.node.position.x -= recoil.current.kick * 0.14
     }
+    group.updateMatrixWorld(true)
+    const emitter = ship.muzzles.get(gameStore.getState().game.activeWeapon) ?? ship.bow
+    emitter.getWorldPosition(bow)
   })
 
   return (
     <>
       <group ref={root}>
         <primitive object={scene} position={ship.center.clone().negate()} />
-        <ShipEvolution length={ship.length} muzzle={muzzle} reducedMotion={reducedMotion} />
       </group>
       <pointLight ref={light} color="#ffb45a" decay={2} />
     </>
@@ -251,3 +274,4 @@ function isVisible(object: Object3D): boolean {
 }
 
 useGLTF.preload(shipUrl, false, true)
+useGLTF.preload(refitsUrl, false, true)
