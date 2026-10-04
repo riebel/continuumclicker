@@ -110,18 +110,21 @@ function AsteroidStatus({
     <div
       ref={box}
       data-testid="asteroid-status"
-      className="pointer-events-none fixed top-0 left-0 z-20 flex flex-col items-center"
+      className="pointer-events-none fixed top-0 left-0 z-20 size-0"
       aria-hidden="true"
     >
       {scene === 'ready' && (
-        <div ref={reticle} className="absolute -translate-1/2 text-crystal/60">
+        <div ref={reticle} className="absolute top-0 left-0 -translate-1/2 text-crystal/60">
           <span className="absolute top-0 left-0 size-3 border-t border-l" />
           <span className="absolute top-0 right-0 size-3 border-t border-r" />
           <span className="absolute bottom-0 left-0 size-3 border-b border-l" />
           <span className="absolute bottom-0 right-0 size-3 border-b border-r" />
         </div>
       )}
-      <div ref={status} className="flex flex-col items-center gap-1">
+      <div
+        ref={status}
+        className="absolute top-0 left-0 flex w-max flex-col items-center gap-1 text-center"
+      >
         {scene === 'unavailable' && (
           <span
             className={cn(
