@@ -1,6 +1,15 @@
 import { useStore } from 'zustand'
 import { createStore } from 'zustand/vanilla'
 import {
+  advanceBoss,
+  BOSS_RULES,
+  BOSS_TYPES,
+  type BossEncounter,
+  createBoss,
+  fireAtBoss,
+  retreatBoss,
+} from './bosses'
+import {
   COMETS,
   CRYSTAL_VEIN,
   type LaserUpgradeId,
@@ -88,6 +97,9 @@ interface PendingTarget {
 
 export interface GameStore {
   readonly game: GameState
+  readonly boss: BossEncounter | null
+  /** Active mining time toward the next interception. Never advances offline. */
+  readonly bossClock: number
   /** Epoch ms up to which the simulation has been advanced. */
   readonly lastTick: number
   readonly notices: readonly Notice[]
@@ -125,6 +137,7 @@ export interface GameStore {
     buyLaser(id: LaserUpgradeId): void
     buyWeapon(id: WeaponId): void
     selectWeapon(id: WeaponId): void
+    retreatBoss(): void
     engage(speedLevel: number): void
     save(options?: { announce?: boolean; now?: number }): void
     reset(): void
@@ -145,6 +158,9 @@ export function createGameStore(
   let shotId = 0
   let eventId = 0
   let systemCharges = createWeaponCharges()
+  let lastFireAt = Number.NEGATIVE_INFINITY
+  let bossSequence = loaded?.state.bossesDefeated ?? 0
+  let bossDue = BOSS_RULES.firstAfter as number
   const between = ([min, max]: readonly [number, number]) => (min + random() * (max - min)) * 1000
 
   return createStore<GameStore>()((set, get) => {
@@ -201,6 +217,8 @@ export function createGameStore(
       comet: null,
       nextCometAt: now + between(COMETS.firstAfter),
       vein: null,
+      boss: null,
+      bossClock: 0,
       actions: {
         tick(time = Date.now()) {
           const { game, lastTick } = get()
@@ -214,6 +232,43 @@ export function createGameStore(
           const result = advance(game, elapsedMs / 1000)
           set({ game: result.state, lastTick: time })
           updateEvents(time, elapsedMs >= OFFLINE_REPORT_AFTER_MS)
+          const current = get()
+          const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden'
+          if (elapsedMs < OFFLINE_REPORT_AFTER_MS && !hidden) {
+            if (current.boss) {
+              const boss = advanceBoss(current.boss, elapsedMs / 1000)
+              set({ boss })
+              if (boss?.stage === 'escaped' && current.boss.stage !== 'escaped') {
+                bossDue = BOSS_RULES.interval
+                set({ bossClock: 0 })
+                notify({
+                  kind: 'info',
+                  title: 'Emergency disengage',
+                  message: 'Shields recovering. Cargo and upgrades are safe.',
+                })
+              }
+            } else if (
+              time - lastFireAt < 12_000 &&
+              current.game.asteroidsMined >= BOSS_RULES.minimumMined &&
+              shipForm(current.game) >= 1
+            ) {
+              const bossClock = current.bossClock + elapsedMs / 1000
+              if (bossClock >= bossDue) {
+                const kind = bossSequence++ % 2 === 0 ? 'leviathan' : 'dreadnought'
+                const boss = createBoss(current.game, ++eventId, kind)
+                set({ boss, bossClock: 0 })
+                notify({
+                  kind: 'warning',
+                  title: 'Long-range contact',
+                  message: BOSS_TYPES[kind].signal,
+                })
+              } else set({ bossClock })
+            }
+          } else if (current.boss && ['warning', 'combat'].includes(current.boss.stage)) {
+            // Returning players never lose a fight or receive an unearned offline bounty.
+            bossDue = BOSS_RULES.interval
+            set({ boss: null, bossClock: 0 })
+          }
           for (const arrival of result.arrivals) announce(arrival)
 
           if (elapsedMs >= OFFLINE_REPORT_AFTER_MS) {
@@ -239,6 +294,32 @@ export function createGameStore(
           get().actions.tick(time)
           const struck = vein && get().vein !== null
           const before = get()
+          lastFireAt = time
+          if (before.boss?.stage === 'combat') {
+            const result = fireAtBoss(before.game, before.boss, systemCharges, random)
+            systemCharges = result.charges
+            set({
+              game: result.game,
+              boss: result.boss,
+              lastShot: {
+                ...result.shot,
+                id: ++shotId,
+                targetId: -before.boss.id,
+                nextTargetId: -before.boss.id,
+              },
+            })
+            if (result.boss.stage === 'victory') {
+              bossDue = BOSS_RULES.interval
+              set({ bossClock: 0 })
+              notify({
+                kind: 'success',
+                title: `${BOSS_TYPES[result.boss.kind].name} defeated`,
+                message: `+${formatNumber(result.shot.bonus)} energy bounty. ${result.game.bossesDefeated} bosses defeated.`,
+              })
+              get().actions.save({ now: time })
+            }
+            return result.shot
+          }
           const nextId = before.miningTarget + 1
           const pending = before.pendingTargets[nextId % MINING_TARGET_COUNT]
           const { state, charges, ...shot } = fireSalvo(before.game, systemCharges, random, {
@@ -283,6 +364,7 @@ export function createGameStore(
 
         passTarget(expected) {
           const before = get()
+          if (before.boss?.stage === 'combat') return
           // A projectile/another frame may already have advanced acquisition.
           if (before.miningTarget !== expected) return
           const nextId = expected + 1
@@ -362,6 +444,8 @@ export function createGameStore(
           const game = jumpSector(before, newSectorSeed(random))
           if (game === before) return
           systemCharges = createWeaponCharges()
+          bossDue = BOSS_RULES.firstAfter
+          lastFireAt = Number.NEGATIVE_INFINITY
           set({
             game,
             notices: [],
@@ -371,6 +455,8 @@ export function createGameStore(
             comet: null,
             nextCometAt: time + between(COMETS.firstAfter),
             vein: null,
+            boss: null,
+            bossClock: 0,
           })
           notify({
             kind: 'success',
@@ -438,6 +524,18 @@ export function createGameStore(
           set((s) => ({ game: selectWeapon(s.game, id) }))
         },
 
+        retreatBoss() {
+          const boss = get().boss
+          if (!boss || !['warning', 'combat'].includes(boss.stage)) return
+          bossDue = BOSS_RULES.interval
+          set({ boss: retreatBoss(boss), bossClock: 0 })
+          notify({
+            kind: 'info',
+            title: 'Contact evaded',
+            message: 'Mining resumed. Cargo and upgrades are safe.',
+          })
+        },
+
         engage(speedLevel) {
           get().actions.tick()
           set((s) => ({ game: engage(s.game, speedLevel) }))
@@ -452,6 +550,9 @@ export function createGameStore(
 
         reset() {
           systemCharges = createWeaponCharges()
+          bossDue = BOSS_RULES.firstAfter
+          bossSequence = 0
+          lastFireAt = Number.NEGATIVE_INFINITY
           clearSave(storage)
           const time = Date.now()
           set({
@@ -464,6 +565,8 @@ export function createGameStore(
             comet: null,
             nextCometAt: time + between(COMETS.firstAfter),
             vein: null,
+            boss: null,
+            bossClock: 0,
           })
         },
 

@@ -41,6 +41,7 @@ const saveSchema = z.object({
   // Added with comets.
   buffs: z.optional(z.array(z.object({ kind: z.string(), remaining: amount }))),
   cometsCaught: z.optional(count),
+  bossesDefeated: z.optional(count),
   // Added with the sector map.
   sectorSeed: z.optional(count),
   location: z.optional(z.nullable(z.string())),
@@ -96,6 +97,7 @@ export function toSaveData(state: GameState, savedAt: number): SaveData {
     asteroidsMined: state.asteroidsMined,
     buffs: state.buffs.map(({ kind, remaining }) => ({ kind, remaining })),
     cometsCaught: state.cometsCaught,
+    bossesDefeated: state.bossesDefeated,
     sectorSeed: state.sectorSeed,
     location: state.location,
     course: state.course && { ...state.course },
@@ -180,6 +182,7 @@ export function fromSaveData(data: SaveData): LoadedGame {
       asteroidsMined: data.asteroidsMined ?? 0,
       buffs: loadBuffs(data.buffs),
       cometsCaught: data.cometsCaught ?? 0,
+      bossesDefeated: data.bossesDefeated ?? 0,
       ...loadTravel(data, initial),
       darkMatter: data.darkMatter ?? 0,
       jumps: data.jumps ?? 0,

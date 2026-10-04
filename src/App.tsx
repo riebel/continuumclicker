@@ -1,5 +1,7 @@
 import { Gauge, Zap } from 'lucide-react'
 import { useRef, useState } from 'react'
+import { useGame } from './game/store'
+import { BossHud } from './ui/BossHud'
 import { cn } from './ui/cn'
 import { EnergyReadout, FlightReadout } from './ui/Hud'
 import { Menu } from './ui/Menu'
@@ -21,6 +23,7 @@ const TABS = [
 
 export function App() {
   useGameLoop()
+  const bossPresent = useGame((s) => s.boss !== null)
   // On small screens only one panel fits; on large screens both are always visible.
   const [tab, setTab] = useState<Tab>('upgrades')
   const shipRef = useRef<HTMLButtonElement>(null)
@@ -38,7 +41,13 @@ export function App() {
         />
       )}
       <main className="relative z-10 flex h-dvh flex-col gap-3 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:grid lg:grid-cols-[minmax(17rem,22rem)_1fr_minmax(17rem,22rem)] lg:grid-rows-[minmax(0,1fr)] lg:gap-6 lg:p-6">
-        <div className={cn('flex min-h-0 items-start', tab !== 'upgrades' && 'max-lg:hidden')}>
+        <div
+          className={cn(
+            'flex min-h-0 items-start',
+            tab !== 'upgrades' && 'max-lg:hidden',
+            bossPresent && 'max-lg:max-h-[15dvh]',
+          )}
+        >
           <UpgradePanel />
         </div>
 
@@ -51,11 +60,19 @@ export function App() {
           <div className="flex min-h-0 w-full flex-1 items-center justify-center [container-type:size]">
             <Stage ref={shipRef} scene={scene} />
           </div>
-          <ShipStatus />
-          <FlightReadout />
+          {bossPresent ? <BossHud /> : <ShipStatus />}
+          <div className={bossPresent ? 'max-lg:hidden' : undefined}>
+            <FlightReadout />
+          </div>
         </section>
 
-        <div className={cn('flex min-h-0 items-start', tab !== 'helm' && 'max-lg:hidden')}>
+        <div
+          className={cn(
+            'flex min-h-0 items-start',
+            tab !== 'helm' && 'max-lg:hidden',
+            bossPresent && 'max-lg:max-h-[15dvh]',
+          )}
+        >
           <SpeedPanel />
         </div>
 

@@ -18,14 +18,30 @@ Warp 9.9999. Installable as an offline-capable PWA.
 - **The arsenal** adds six unlockable weapons alongside the pulse laser: an overcharging plasma
   cannon, a crystal-piercing railgun, Tesla chain lightning, a freeze-and-shatter cryo beam,
   missile salvos and a singularity that collapses an asteroid. Each has five upgrade levels.
-  Select the Arsenal tab to unlock or improve a weapon; switch weapons in the ship status panel.
+  Select the Arsenal tab to install or improve weapons. Purchased systems remain fitted to
+  separate hardpoints and fire automatically alongside the pulse laser.
   All weapons benefit from your laser upgrades. Hold the ship button to keep firing.
 - **Ship transformations** start with your first reactor upgrade. Combined module tiers unlock
   seven hull forms: Scout, Interceptor, Frigate, Destroyer, Battlecruiser, Dreadnought and Star
   fortress. Swept wings, engine pods, armour, command decks, spinal rails and reactor rings deploy
-  around the hull, and the active weapon gets its own visible mount and shot effects. The refit
+  around the hull, and installed weapons get their own visible mounts and shot effects. The refit
   bar below the ship shows progress toward the next form. Weapons and selection persist in saves;
   existing saves automatically receive the pulse laser.
+- **Boss encounters** intercept an actively mining upgraded ship after about 150 seconds of
+  active mining, then roughly every 330 seconds of mining between encounters. A nine-second
+  warning precedes the Nacre Leviathan or Obsidian Dreadnought. Keep clicking/holding the same
+  firing surface: hardpoints automatically acquire the boss's physical weak point. Three phases
+  accelerate incoming attacks; focus fire interrupts telegraphed attacks, Tesla disrupts charge,
+  Cryo slows it and railguns penetrate capital armour. Singularities deal bounded rupture damage.
+  Shields protect the ship; **Disengage** resumes mining with cargo/upgrades intact. Encounters
+  never advance offline. Bounties and lifetime victories persist; active fights do not.
+- **Balance** now includes all mounted weapons, target HP/overkill, crystal distribution,
+  charge cycles, combat duration and lost mining time. Reactor contribution to mining is 4.5%,
+  plus 0.15% per amplifier level. Extra simultaneous fracture damage recovers diminishing energy,
+  so additional guns improve mining without multiplying income uncontrollably. The economy bot
+  reaches sustainable maximum warp in about 9.4 hours when active, 8.7 hours with successful
+  optional bounty hunting, and 33.3 hours when idle; these are ideal simulations, not deadlines.
+  Travel rings and reactor unlock pacing remain covered by tests; prestige favours 4–6 hour runs.
 - **The helm** sets your speed. Every level drains energy per second:
   - *white*: your reactors cover the drain, you can cruise forever,
   - *orange*: it drains your reserves; when they run dry the ship automatically drops to the
@@ -89,6 +105,7 @@ blender/
   build_arsenal.py Additive hardpoints, paired weapons and missile batteries → glTF
   build_projectiles.py Detailed flight models with emissive cores and exhaust markers → glTF
   build_mining.py Sculpted asteroid variants, crystals and fragments → glTF
+  build_bosses.py Articulated cosmic organism and hostile siege vessel, baked PBR atlases → glTF
   render.py     Cycles stills: PWA icons and the no-WebGL fallback poster
   run.mjs       Runs those scripts with a locally installed Blender
 ```
@@ -162,6 +179,19 @@ rock fragment, baking mineral strata and contact shadows into vertex colours. Th
 `mining.glb` is about 269 KB; no meshes are allocated on each hit. Its editable source scene is
 saved to `blender/build/mining.raw.blend`.
 
+`blender/build_bosses.py` builds both encounter models with the original ship's modelling tools.
+The Leviathan has layered chitin, skeletal tendons, a recessed radial iris and eight independently
+rigged limbs. Its 2K colour and 1K tangent-normal/roughness atlases are baked in Cycles; data maps
+are compressed as lossless WebP. The dreadnought has plated siege shoulders, recessed hangars,
+six twin turrets, an exposed dorsal reactor and native engine throats. Both use 48-sample vertex
+AO. Extras identify boss roots, articulated parts, physical weak points and twelve enemy muzzle
+outlets. Meshopt compression keeps the asset within the offline cache's per-file budget.
+The editable Blender scene is `blender/build/bosses.raw.blend`, with the two models side by side.
+The runtime reuses all geometry, drives tendril animation, locks beams/missiles to the native
+weak-point markers and fires siege batteries from the actual gun barrels. Combat HUDs use HP
+bars rather than asteroid pips, and reserve scene space on mobile. Reduced motion removes
+approach/limb travel and softens effects; the accessible firing surface stays in place.
+
 The engines really glow: the throats are emissive geometry and the exhaust plumes are shaders
 (hot core, taper, flicker, Mach diamonds at high thrust), both brighter than 1.0 so the HDR bloom
 pass picks them up, and a point light at the engine cluster lights the hull. Thrust follows the
@@ -177,6 +207,7 @@ npm run model:refits                                  # → src/assets/refits.gl
 npm run model:arsenal                                 # → src/assets/arsenal.glb + editable .blend
 npm run model:projectiles                             # → src/assets/projectiles.glb + editable .blend
 npm run model:mining                                  # → src/assets/mining.glb + editable .blend
+npm run model:bosses                                  # → src/assets/bosses.glb + editable .blend + PBR atlases
 node blender/run.mjs render.py preview.png --tier 3   # Cycles still with modules up to tier 3
 ```
 

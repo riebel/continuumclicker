@@ -73,6 +73,8 @@ export interface GameState {
   readonly asteroidsMined: number
   readonly buffs: readonly Buff[]
   readonly cometsCaught: number
+  /** Lifetime victories; encounters themselves are foreground-only and never saved. */
+  readonly bossesDefeated: number
   /** Seed of this game's sector map. */
   readonly sectorSeed: number
   /** The system the ship is docked at, null while travelling. */
@@ -124,6 +126,7 @@ export function createInitialState(sectorSeed = 1): GameState {
     asteroidsMined: 0,
     buffs: [],
     cometsCaught: 0,
+    bossesDefeated: 0,
     sectorSeed,
     location: HOME_ID,
     course: null,
@@ -249,6 +252,7 @@ export function jumpSector(state: GameState, sectorSeed: number): GameState {
     clicks: state.clicks,
     asteroidsMined: state.asteroidsMined,
     cometsCaught: state.cometsCaught,
+    bossesDefeated: state.bossesDefeated,
   }
 }
 
@@ -383,7 +387,7 @@ export function buyLaser(state: GameState, id: LaserUpgradeId): GameState {
  */
 export function hitEnergy(state: GameState): number {
   const amplifier = state.lasers['laser-amplifier']
-  const share = LASER.productionShare + 0.002 * amplifier
+  const share = LASER.productionShare + 0.0015 * amplifier
   const hit = LASER.baseEnergy * (1 + amplifier) + share * production(state)
   const belt = dockedAt(state)?.kind === 'belt' ? VISITS.beltHitMultiplier : 1
   return hit * belt * buffMultiplier(state, 'laser-frenzy')
@@ -506,13 +510,17 @@ export function fireSalvo(
     }
   }
   const leading = salvo.findLast((s) => s.damage > 0) ?? salvo[0]
+  const damage = salvo.reduce((sum, s) => sum + s.damage, 0)
+  const recovery = salvoRecovery(damage)
+  const gained = salvo.reduce((sum, s) => sum + s.gained, 0) * recovery
+  const bonus = salvo.reduce((sum, s) => sum + s.bonus, 0) * recovery
   return {
     weapon: leading?.weapon ?? 'pulse',
     salvo,
     target,
-    damage: salvo.reduce((sum, s) => sum + s.damage, 0),
-    gained: salvo.reduce((sum, s) => sum + s.gained, 0),
-    bonus: salvo.reduce((sum, s) => sum + s.bonus, 0),
+    damage,
+    gained,
+    bonus,
     chained: salvo.reduce((sum, s) => sum + s.chained, 0),
     critical: salvo.some((s) => s.critical),
     special: salvo.find((s) => s.special)?.special ?? null,
@@ -522,8 +530,72 @@ export function fireSalvo(
       activeWeapon: state.activeWeapon,
       weaponCharge: nextCharges.pulse,
       clicks: state.clicks + 1,
+      energy: state.energy + gained + bonus,
+      lifetimeEnergy: state.lifetimeEnergy + gained + bonus,
     },
   }
+}
+
+export function salvoRecovery(damage: number): number {
+  return damage <= 1 ? 1 : (1 + (damage - 1) * LASER.salvoRecovery) / damage
+}
+
+const miningEstimates = new Map<string, number>()
+
+/**
+ * Expected mounted-arsenal income, sampled over 720 deterministic volleys.
+ * Critical rewards are integrated analytically; actual HP, overkill, cryo, chain and collapse
+ * rules come from fireSalvo. Reactor scaling is factored out so economy bots reuse the result.
+ */
+export function expectedSalvoEnergy(state: GameState): number {
+  if (WEAPONS.every((w) => w.id === 'pulse' || state.weapons[w.id] === 0))
+    return expectedHitEnergy(state)
+  const key = [
+    ...WEAPONS.map((w) => state.weapons[w.id]),
+    state.lasers['precision-scanner'],
+    state.lasers['crystal-resonator'],
+    crystalChance(state),
+    hasModule(state, 'chain-laser'),
+  ].join(':')
+  let estimate = miningEstimates.get(key)
+  if (estimate === undefined) {
+    let model = {
+      ...createInitialState(),
+      weapons: state.weapons,
+      lasers: { ...state.lasers, 'laser-amplifier': 0 },
+      equipped: state.equipped,
+    }
+    let charges = createWeaponCharges()
+    let energy = 0
+    const samples = 720
+    let nextIndex = 1
+    for (let i = 0; i < samples; i++) {
+      // Low-discrepancy target sequence keeps small equipment improvements from being
+      // mistaken for a different lucky crystal distribution by the economy planner.
+      const crystal = (nextIndex * 0.61803398875) % 1 < crystalChance(state)
+      const hp = crystal
+        ? ASTEROIDS.crystal.hp
+        : ASTEROIDS.rock.minHp +
+          Math.floor(
+            ((nextIndex * 0.754877666) % 1) * (ASTEROIDS.rock.maxHp - ASTEROIDS.rock.minHp + 1),
+          )
+      const result = fireSalvo(model, charges, () => 0.99, {
+        nextAsteroid: { kind: crystal ? 'crystal' : 'rock', hp, maxHp: hp },
+      })
+      if (result.target.hp <= 0) nextIndex++
+      const crits = (result.salvo ?? []).reduce((sum, s) => {
+        const chance = Math.min(1, critChance(state) + (s.weapon === 'swarm' ? 0.1 : 0))
+        return sum + s.gained * chance * (critMultiplier(state) - 1)
+      }, 0)
+      energy += result.gained + result.bonus + crits * salvoRecovery(result.damage)
+      model = result.state
+      charges = result.charges
+    }
+    estimate = energy / samples
+    if (miningEstimates.size > 512) miningEstimates.clear()
+    miningEstimates.set(key, estimate)
+  }
+  return hitEnergy(state) * estimate
 }
 
 /**

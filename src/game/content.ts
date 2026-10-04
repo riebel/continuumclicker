@@ -106,13 +106,15 @@ export const LASER = {
   /** Energy of a hit before upgrades. */
   baseEnergy: 1,
   /** Share of gross reactor output added to every hit. */
-  productionShare: 0.06,
+  productionShare: 0.045,
   critChance: 0.05,
   critMultiplier: 3,
   /** Energy for breaking an asteroid, as a share of the value of all hits it took. */
   breakBonus: 0.5,
   /** Shots per second while the fire button is held down. */
   autoFireRate: 4,
+  /** Heavy fractures recover a diminishing share of additional damage as usable energy. */
+  salvoRecovery: 0.24,
 } as const
 
 export const ASTEROIDS = {
@@ -169,7 +171,7 @@ export const LASER_UPGRADES = [
   {
     id: 'laser-amplifier',
     name: 'Laser amplifier',
-    effect: 'Hits gain +1 energy and +0.2% of reactor output',
+    effect: 'Hits gain +1 energy and +0.15% of reactor output',
     baseCost: 50,
     costGrowth: 5,
   },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SECTOR_RINGS, SPEED_LEVELS, SPEED_OF_LIGHT_KMH, UPGRADES } from './content'
+import { SECTOR_RINGS, SPEED_LEVELS, SPEED_OF_LIGHT_KMH, UPGRADES, WEAPONS } from './content'
 import { expectedCometBoost, sustainableLevel } from './engine'
 import { ACTIVE, IDLE, longestWait, simulate } from './simulate'
 
@@ -12,6 +12,7 @@ const HOUR = 60 * MINUTE
 
 const active = simulate(ACTIVE, 3 * 24 * HOUR)
 const idle = simulate(IDLE, 3 * 24 * HOUR)
+const hunter = simulate({ ...ACTIVE, bosses: true }, 3 * 24 * HOUR)
 const unlockTimes = (sim: typeof active) =>
   UPGRADES.map((u) => sim.firstPurchaseAt[u.id] ?? Number.POSITIVE_INFINITY)
 
@@ -76,11 +77,11 @@ describe('active play', () => {
     expect(longestWait(active.purchases, 8 * HOUR)).toBeLessThan(30 * MINUTE)
   })
 
-  it('earns two to three times the reactor output by mining', () => {
+  it('keeps a complete mounted arsenal within the new active-income envelope', () => {
     for (const { time, production, total } of active.income) {
       if (time < 10 * MINUTE) continue
-      expect(total / production).toBeGreaterThan(1.6)
-      expect(total / production).toBeLessThan(3.5)
+      expect(total / production).toBeGreaterThan(1.8)
+      expect(total / production).toBeLessThan(4.5)
     }
   })
 
@@ -93,6 +94,22 @@ describe('active play', () => {
     expect(active.maxWarpAt).not.toBeNull()
     expect(active.maxWarpAt).toBeGreaterThan(8 * HOUR)
     expect(active.maxWarpAt).toBeLessThan(18 * HOUR)
+  })
+})
+
+describe('optional bounty hunting', () => {
+  it('rewards victories without making them necessary for progression', () => {
+    expect(hunter.maxWarpAt).not.toBeNull()
+    expect(hunter.maxWarpAt).toBeLessThan(active.maxWarpAt ?? 0)
+    expect(hunter.maxWarpAt).toBeGreaterThan((active.maxWarpAt ?? 0) * 0.75)
+    expect(active.maxWarpAt).toBeLessThan(14 * HOUR)
+  })
+  it('keeps every auxiliary weapon affordable within the first hour', () => {
+    for (const w of WEAPONS) {
+      if (w.id === 'pulse') continue
+      const sample = active.income.find((i) => i.time > 50 * MINUTE)
+      expect(sample?.total ?? 0).toBeGreaterThan(w.baseCost / (10 * MINUTE))
+    }
   })
 })
 

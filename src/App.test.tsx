@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
+import { createBoss } from './game/bosses'
 import { sectorFor } from './game/sector'
 import { gameStore } from './game/store'
 import { asteroidOnScreen } from './scene/target'
@@ -94,6 +95,26 @@ describe('App', () => {
     await user.keyboard('{Enter}')
 
     expect(gameStore.getState().game.clicks).toBe(1)
+  })
+
+  it('uses the same accessible firing surface for bosses and resumes mining after retreat', async () => {
+    const user = userEvent.setup()
+    const game = gameStore.getState().game
+    act(() =>
+      gameStore.setState({ boss: { ...createBoss(game, 9, 'dreadnought'), stage: 'combat' } }),
+    )
+    render(<App />)
+    const stage = screen.getByRole('button', { name: /fire all installed weapons at the boss/i })
+    expect(screen.getByRole('progressbar', { name: 'Boss hull integrity' })).toBeInTheDocument()
+    expect(screen.queryByTestId('asteroid-status')).not.toBeInTheDocument()
+    stage.focus()
+    await user.keyboard('{Enter}')
+    expect(gameStore.getState().lastShot?.targetId).toBe(-9)
+    expect(gameStore.getState().game.asteroid).toBe(game.asteroid)
+    expect(gameStore.getState().game.bossesDefeated).toBe(0)
+    await user.click(screen.getByRole('button', { name: 'Disengage' }))
+    expect(screen.getByRole('button', { name: /fire the mining laser/i })).toBe(stage)
+    expect(screen.getByTestId('asteroid-status')).toBeInTheDocument()
   })
 
   it('catches a comet', async () => {

@@ -24,6 +24,7 @@ import { WEAPONS } from '../game/content'
 import { type Shot, warpIntensity } from '../game/engine'
 import { mulberry32 } from '../game/random'
 import { gameStore } from '../game/store'
+import type { BossWorld } from './Boss'
 import { CAMERA_DISTANCE, HEADING, layoutPosition, stageBox } from './constants'
 import {
   beltVisibility,
@@ -107,11 +108,20 @@ interface MiningProps {
   target: Vector3
   collector: Vector3
   muzzles?: WeaponMuzzles
+  bossWorld?: BossWorld
   reducedMotion: boolean
 }
 
 /** Persistent distant targets; acquisition and salvage never move the player's input. */
-export function Mining({ anchor, bow, target, collector, muzzles, reducedMotion }: MiningProps) {
+export function Mining({
+  anchor,
+  bow,
+  target,
+  collector,
+  muzzles,
+  bossWorld,
+  reducedMotion,
+}: MiningProps) {
   const { scene: models } = useGLTF(miningUrl, false, true)
   const holders = useRef<(Group | null)[]>([])
   const rocks = useRef<(Mesh | null)[]>([])
@@ -243,6 +253,12 @@ export function Mining({ anchor, bow, target, collector, muzzles, reducedMotion 
   useEffect(
     () =>
       gameStore.subscribe((state, previous) => {
+        if (state.boss?.stage === 'combat' && previous.boss?.stage !== 'combat') {
+          sim.shots.length = 0
+          sim.field.reset(state.miningTarget, state.game.asteroid.kind)
+          sim.hitTarget = null
+          sim.asteroid = state.game.asteroid
+        }
         if (state.miningTarget < previous.miningTarget || (!state.lastShot && previous.lastShot)) {
           sim.shots.length = 0
           sim.field.reset(state.miningTarget, state.game.asteroid.kind)
@@ -260,6 +276,7 @@ export function Mining({ anchor, bow, target, collector, muzzles, reducedMotion 
           sim.asteroid = state.game.asteroid
         }
         if (state.lastShot && state.lastShot !== previous.lastShot) {
+          if (state.lastShot.targetId < 0) return
           const ordinal = state.lastShot.targetId
           const slot = sim.field.slot(ordinal)
           const center = sim.centers[slot] as Vector3
@@ -291,9 +308,29 @@ export function Mining({ anchor, bow, target, collector, muzzles, reducedMotion 
     const dt = Math.min(delta, 0.1)
     const now = state.clock.elapsedTime
     sim.now = now
-    const { game, miningTarget, actions } = gameStore.getState()
+    const { game, miningTarget, actions, boss } = gameStore.getState()
     const random = sim.random
     const box = stageBox(element.getBoundingClientRect(), state.size)
+    if (boss?.stage === 'combat' && bossWorld) {
+      for (const holder of holders.current) if (holder) holder.visible = false
+      for (const mesh of [
+        sparksMesh.current,
+        chunksMesh.current,
+        salvageMesh.current,
+        tethers.current,
+      ])
+        if (mesh) mesh.count = 0
+      for (const sprite of [impact.current, burst.current, intake.current])
+        if (sprite) sprite.visible = false
+      if (light.current) light.current.intensity = 0
+      sim.targetTracks.setTarget(-boss.id, bossWorld.point, bossWorld.radius)
+      sim.center.copy(bossWorld.point)
+      sim.radius = bossWorld.radius
+      sim.projectileHit.copy(bossWorld.point)
+      target.copy(bossWorld.point)
+      asteroidOnScreen.visible = false
+      return
+    }
     if (!sim.shots.length && sim.field.ordinal !== miningTarget)
       sim.field.reset(miningTarget, game.asteroid.kind)
     const passing = sim.field.advance(dt, warpIntensity(game), reducedMotion, sim.shots.length > 0)

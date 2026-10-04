@@ -27,7 +27,8 @@
     "model:refits": "node blender/run.mjs build_refits.py && gltf-transform meshopt blender/build/refits.raw.glb src/assets/refits.glb",
     "model:mining": "node blender/run.mjs build_mining.py && gltf-transform meshopt blender/build/mining.raw.glb src/assets/mining.glb",
     "model:arsenal": "node blender/run.mjs build_arsenal.py && gltf-transform meshopt blender/build/arsenal.raw.glb src/assets/arsenal.glb",
-    "model:projectiles": "node blender/run.mjs build_projectiles.py && gltf-transform meshopt blender/build/projectiles.raw.glb src/assets/projectiles.glb"
+    "model:projectiles": "node blender/run.mjs build_projectiles.py && gltf-transform meshopt blender/build/projectiles.raw.glb src/assets/projectiles.glb",
+    "model:bosses": "node blender/run.mjs build_bosses.py && gltf-transform webp blender/build/bosses.raw.glb blender/build/bosses.textures.glb --formats png --lossless true && gltf-transform meshopt blender/build/bosses.textures.glb src/assets/bosses.glb"
   },
   "dependencies": {
     "@fontsource-variable/source-sans-3": "^5.3.0",

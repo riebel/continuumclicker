@@ -6,6 +6,7 @@ import { type RefObject, Suspense, useEffect, useState } from 'react'
 import { Vector3 } from 'three'
 import { warpIntensity } from '../game/engine'
 import { gameStore } from '../game/store'
+import { Boss, createBossWorld } from './Boss'
 import { CAMERA_DISTANCE, CAMERA_FOV } from './constants'
 import { Mining } from './Mining'
 import { Ship } from './Ship'
@@ -37,6 +38,7 @@ export default function ShipScene({ anchor, reducedMotion, onReady }: ShipSceneP
   const [target] = useState(() => new Vector3())
   const [collector] = useState(() => new Vector3())
   const [muzzles] = useState(createWeaponMuzzles)
+  const [bossWorld] = useState(createBossWorld)
   return (
     <Canvas
       flat
@@ -85,6 +87,12 @@ export default function ShipScene({ anchor, reducedMotion, onReady }: ShipSceneP
       </Environment>
 
       <Suspense fallback={null}>
+        <Boss
+          anchor={anchor}
+          world={bossWorld}
+          collector={collector}
+          reducedMotion={reducedMotion}
+        />
         <Ship
           anchor={anchor}
           bow={bow}
@@ -99,6 +107,7 @@ export default function ShipScene({ anchor, reducedMotion, onReady }: ShipSceneP
           target={target}
           collector={collector}
           muzzles={muzzles}
+          bossWorld={bossWorld}
           reducedMotion={reducedMotion}
         />
         <Ready onReady={onReady} />

@@ -9,6 +9,7 @@ function Stats() {
   const clicks = useGame((s) => s.game.clicks)
   const mined = useGame((s) => s.game.asteroidsMined)
   const comets = useGame((s) => s.game.cometsCaught)
+  const bosses = useGame((s) => s.game.bossesDefeated)
   const lifetime = useGame((s) => s.game.lifetimeEnergy)
   const distance = useGame((s) => s.game.distance)
   const sector = useGame((s) => s.game.jumps + 1)
@@ -19,6 +20,7 @@ function Stats() {
     ['Laser shots', formatNumber(clicks)],
     ['Asteroids mined', formatNumber(mined)],
     ['Comets caught', formatNumber(comets)],
+    ['Bosses defeated', formatNumber(bosses)],
     ['Energy generated', formatNumber(lifetime)],
     ['Distance in this sector', `${formatNumber(distance)} km`],
     ['Deep-space distance', formatAstronomical(distance)],

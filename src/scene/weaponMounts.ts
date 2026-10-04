@@ -22,6 +22,15 @@ export class WeaponTargetCache {
     return this.targets.get(id)
   }
 
+  /** External targets use the same stable live track as rocks, including boss weak points. */
+  setTarget(id: number, point: Vector3, radius: number) {
+    const target = this.targets.get(id) ?? { point: new Vector3(), radius }
+    target.point.copy(point)
+    target.radius = radius
+    this.targets.set(id, target)
+    return target
+  }
+
   update(
     rocks: readonly { ordinal: number }[],
     centers: readonly Vector3[],

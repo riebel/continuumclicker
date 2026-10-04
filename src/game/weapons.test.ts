@@ -4,6 +4,7 @@ import {
   buyWeapon,
   createInitialState,
   createWeaponCharges,
+  expectedSalvoEnergy,
   fire,
   fireSalvo,
   type GameState,
@@ -11,6 +12,7 @@ import {
   shipForm,
   shipModuleTiers,
 } from './engine'
+import { mulberry32 } from './random'
 import { fromSaveData, toSaveData } from './save'
 
 const noCrit = () => 0.5
@@ -120,8 +122,33 @@ describe('mounted weapon volleys', () => {
       bonus: 45,
     })
     expect(result.state.clicks).toBe(19)
-    expect(result.state.energy).toBe(75)
+    expect(result.state.energy).toBeCloseTo(23.7)
+    expect(result.state.energy).toBeCloseTo(result.gained + result.bonus)
     expect(result.state.asteroidsMined).toBe(1)
+  })
+
+  it('predicts actual full-arsenal mining income without counting overkill or a lucky crystal sequence', () => {
+    const initial = createInitialState()
+    const start = {
+      ...initial,
+      owned: { ...initial.owned, 'driver-coil': 10 },
+      weapons: Object.fromEntries(
+        WEAPONS.map((w) => [w.id, w.id === 'pulse' ? 1 : 5]),
+      ) as GameState['weapons'],
+      lasers: { 'laser-amplifier': 3, 'precision-scanner': 6, 'crystal-resonator': 4 },
+    }
+    let game = start
+    let charges = createWeaponCharges()
+    const random = mulberry32(77)
+    const shots = 10_000
+    for (let i = 0; i < shots; i++) {
+      const fired = fireSalvo(game, charges, random)
+      game = fired.state
+      charges = fired.charges
+    }
+    const measured = (game.lifetimeEnergy - start.lifetimeEnergy) / shots
+    expect(expectedSalvoEnergy(start) / measured).toBeGreaterThan(0.9)
+    expect(expectedSalvoEnergy(start) / measured).toBeLessThan(1.1)
   })
 })
 

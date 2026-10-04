@@ -32,8 +32,8 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,webp,png,woff2,glb}'],
-        // Include the detailed Blender refits (4.52 MB) in offline installations.
-        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        // Include detailed refits and articulated, textured Blender bosses in offline installs.
+        maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         // The UI is English-only: skip font subsets the browser never downloads.
         globIgnores: ['**/*-{greek,greek-ext,cyrillic,cyrillic-ext,vietnamese}-*.woff2'],
       },

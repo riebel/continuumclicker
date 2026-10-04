@@ -1,3 +1,4 @@
+import { expectedBossIncome } from './bosses'
 import {
   LASER,
   LASER_UPGRADES,
@@ -5,18 +6,24 @@ import {
   MAX_DRAIN,
   UPGRADES,
   type UpgradeId,
+  WEAPON_MAX_LEVEL,
+  WEAPONS,
+  type WeaponId,
 } from './content'
 import {
   advance,
   buyLaser,
   buyUpgrade,
+  buyWeapon,
   createInitialState,
-  expectedHitEnergy,
+  expectedSalvoEnergy,
   type GameState,
   isLaserMaxed,
   laserCost,
   production,
+  shipForm,
   upgradeCost,
+  weaponCost,
 } from './engine'
 
 /**
@@ -28,6 +35,8 @@ export interface Playstyle {
   readonly shotsPerSecond: number
   /** Stop mining once production reaches this many energy per second. */
   readonly mineUntilProduction: number
+  /** Optional hunting, including real combat duration, shield failures and lost mining time. */
+  readonly bosses?: boolean
 }
 
 /** Holds the fire button the whole time. */
@@ -38,17 +47,21 @@ export const ACTIVE: Playstyle = {
 /** Mines only to afford the first reactor, then leaves the game running. */
 export const IDLE: Playstyle = { shotsPerSecond: LASER.autoFireRate, mineUntilProduction: 0.1 }
 
-type Item = { kind: 'reactor'; id: UpgradeId } | { kind: 'laser'; id: LaserUpgradeId }
+type Item =
+  | { kind: 'reactor'; id: UpgradeId }
+  | { kind: 'laser'; id: LaserUpgradeId }
+  | { kind: 'weapon'; id: WeaponId }
 
 const ITEMS: readonly Item[] = [
   ...UPGRADES.map((u) => ({ kind: 'reactor' as const, id: u.id })),
   ...LASER_UPGRADES.map((u) => ({ kind: 'laser' as const, id: u.id })),
+  ...WEAPONS.filter((w) => w.id !== 'pulse').map((w) => ({ kind: 'weapon' as const, id: w.id })),
 ]
 
 export interface Purchase {
   /** Seconds since the start. */
   readonly time: number
-  readonly id: UpgradeId | LaserUpgradeId
+  readonly id: UpgradeId | LaserUpgradeId | WeaponId
   /** Owned count or level after the purchase. */
   readonly owned: number
 }
@@ -68,6 +81,12 @@ export interface Simulation {
 }
 
 function cost(state: GameState, item: Item): number {
+  if (item.kind === 'weapon') {
+    const weapon = WEAPONS.find((w) => w.id === item.id)
+    return weapon && state.weapons[item.id] < WEAPON_MAX_LEVEL
+      ? weaponCost(weapon, state.weapons[item.id])
+      : Number.POSITIVE_INFINITY
+  }
   if (item.kind === 'reactor') {
     const upgrade = UPGRADES.find((u) => u.id === item.id)
     return upgrade ? upgradeCost(upgrade, state.owned[item.id]) : Number.POSITIVE_INFINITY
@@ -78,12 +97,15 @@ function cost(state: GameState, item: Item): number {
 }
 
 function withOneMore(state: GameState, item: Item): GameState {
+  if (item.kind === 'weapon')
+    return { ...state, weapons: { ...state.weapons, [item.id]: state.weapons[item.id] + 1 } }
   return item.kind === 'reactor'
     ? { ...state, owned: { ...state.owned, [item.id]: state.owned[item.id] + 1 } }
     : { ...state, lasers: { ...state.lasers, [item.id]: state.lasers[item.id] + 1 } }
 }
 
 function buy(state: GameState, item: Item): GameState {
+  if (item.kind === 'weapon') return buyWeapon(state, item.id)
   return item.kind === 'reactor' ? buyUpgrade(state, item.id) : buyLaser(state, item.id)
 }
 
@@ -105,7 +127,10 @@ export function simulate(
   while (time < maxSeconds) {
     const produced = production(state)
     const shots = produced < style.mineUntilProduction ? style.shotsPerSecond : 0
-    const incomeOf = (s: GameState) => production(s) + shots * expectedHitEnergy(s)
+    const incomeOf = (s: GameState) => {
+      const bounty = style.bosses && shots > 0 && shipForm(s) >= 1 ? expectedBossIncome(s) : 0
+      return production(s) + shots * expectedSalvoEnergy(s) + bounty
+    }
     const current = incomeOf(state)
     const mining = current - produced
     income.push({ time, production: produced, total: current, lifetime: state.lifetimeEnergy })
@@ -117,6 +142,7 @@ export function simulate(
     for (const item of ITEMS) {
       const price = cost(state, item)
       const gain = incomeOf(withOneMore(state, item)) - current
+      if (!Number.isFinite(price) || gain <= 0) continue
       const wait = Math.max(0, (price - state.energy) / current)
       const score = wait + price / gain
       if (!best || score < best.score) best = { item, wait, score }
@@ -137,7 +163,12 @@ export function simulate(
     if (bought === state) continue
     state = bought
     const { item } = best
-    const owned = item.kind === 'reactor' ? state.owned[item.id] : state.lasers[item.id]
+    const owned =
+      item.kind === 'reactor'
+        ? state.owned[item.id]
+        : item.kind === 'laser'
+          ? state.lasers[item.id]
+          : state.weapons[item.id]
     purchases.push({ time, id: item.id, owned })
     if (item.kind === 'reactor') firstPurchaseAt[item.id] ??= time
   }

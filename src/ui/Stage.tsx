@@ -13,7 +13,7 @@ import { ASTEROIDS, LASER } from '../game/content'
 import type { Asteroid, CometReward } from '../game/engine'
 import { formatNumber } from '../game/format'
 import { gameStore, useActions, useGame } from '../game/store'
-import { asteroidOnScreen } from '../scene/target'
+import { asteroidOnScreen, bossOnScreen } from '../scene/target'
 import { Comet } from './Comet'
 import { cn } from './cn'
 
@@ -214,6 +214,7 @@ export function Stage({ ref, scene }: StageProps) {
   const actions = useActions()
   const reducedMotion = useReducedMotion()
   const crystalLock = useGame((s) => s.vein !== null)
+  const fightingBoss = useGame((s) => s.boss?.stage === 'combat')
   const [popups, setPopups] = useState<Popup[]>([])
   const nextId = useRef(0)
   const autoFire = useRef<number | undefined>(undefined)
@@ -223,7 +224,11 @@ export function Stage({ ref, scene }: StageProps) {
 
   const shoot = (options?: { vein?: boolean }) => {
     const shot = actions.fire({ vein: options?.vein ?? gameStore.getState().vein !== null })
-    const { x, y, radius } = asteroidPosition(ref.current)
+    const fighting =
+      gameStore.getState().lastShot?.targetId !== undefined &&
+      (gameStore.getState().lastShot?.targetId ?? 0) < 0
+    const { x, y, radius } =
+      fighting && bossOnScreen.visible ? bossOnScreen : asteroidPosition(ref.current)
     const popup = (amount: number, tone: Tone): Popup => ({
       id: nextId.current++,
       x: x + (Math.random() - 0.5) * radius * 1.2,
@@ -235,7 +240,15 @@ export function Stage({ ref, scene }: StageProps) {
       duration: tone === 'bonus' ? 1.8 : 1.1 + Math.random() * 0.4,
     })
     const tone = shot.critical ? 'crit' : shot.target.kind === 'crystal' ? 'crystal' : 'hit'
-    const added = [popup(shot.gained, tone)]
+    const added = [
+      fighting
+        ? {
+            ...popup(shot.damage, tone),
+            text: `${formatNumber(shot.damage)}${shot.critical ? '!' : ''}`,
+            tone: 'hit' as const,
+          }
+        : popup(shot.gained, tone),
+    ]
     if (shot.bonus > 0) added.push({ ...popup(shot.bonus, 'bonus'), x, driftX: 0 })
     if (shot.special)
       added.push({
@@ -311,7 +324,11 @@ export function Stage({ ref, scene }: StageProps) {
         onLostPointerCapture={stopFiring}
         onClick={onClick}
         onContextMenu={(event) => event.preventDefault()}
-        aria-label="Fire the mining laser at the asteroid (hold to keep firing)"
+        aria-label={
+          fightingBoss
+            ? 'Fire all installed weapons at the boss (hold to keep firing)'
+            : 'Fire the mining laser at the asteroid (hold to keep firing)'
+        }
         className="relative aspect-square w-[min(100cqw,100cqh,44rem)] cursor-crosshair touch-manipulation rounded-full"
       >
         {scene === 'unavailable' && (
@@ -329,9 +346,11 @@ export function Stage({ ref, scene }: StageProps) {
         )}
         {scene !== 'loading' && (
           <span className="pointer-events-none absolute right-0 bottom-[8%] left-0 text-center text-[10px] font-semibold tracking-[0.17em] text-white/45 uppercase">
-            {crystalLock
-              ? 'Crystal lock · next hit critical'
-              : 'Auto target · click or hold to fire'}
+            {fightingBoss
+              ? 'Focus fire · hold to interrupt attacks'
+              : crystalLock
+                ? 'Crystal lock · next hit critical'
+                : 'Auto target · click or hold to fire'}
           </span>
         )}
       </button>
@@ -340,8 +359,8 @@ export function Stage({ ref, scene }: StageProps) {
         <>
           {scene !== 'loading' && (
             <>
-              <AsteroidStatus stage={ref} scene={scene} />
-              <CrystalVein stage={ref} onStrike={() => shoot({ vein: true })} />
+              {!fightingBoss && <AsteroidStatus stage={ref} scene={scene} />}
+              {!fightingBoss && <CrystalVein stage={ref} onStrike={() => shoot({ vein: true })} />}
             </>
           )}
           <Comet onCaught={onCometCaught} />

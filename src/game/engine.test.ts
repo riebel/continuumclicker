@@ -128,7 +128,7 @@ describe('mining laser', () => {
 
   it('scales hits with gross reactor output', () => {
     const idle = withState({ owned: { ...createInitialState().owned, 'driver-coil': 10 } }) // 60 eps
-    expect(hitEnergy(idle)).toBeCloseTo(1 + 0.06 * 60)
+    expect(hitEnergy(idle)).toBeCloseTo(3.7)
     const flying = { ...idle, speedLevel: SPEED_LEVELS.length - 1 }
     expect(hitEnergy(flying)).toBe(hitEnergy(idle))
   })

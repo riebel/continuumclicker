@@ -193,6 +193,7 @@ export function Ship({ anchor, bow, target, collector, muzzles, reducedMotion }:
   const light = useRef<PointLight>(null)
   const throttle = useRef(0)
   const recoil = useRef({ shot: 0, kick: 0 })
+  const combat = useRef(0)
   const mounted = useRef(false)
   const temp = useMemo(
     () => ({
@@ -241,8 +242,22 @@ export function Ship({ anchor, bow, target, collector, muzzles, reducedMotion }:
 
     // Fit the ship into its spot in the anchor element's box.
     const box = stageBox(element.getBoundingClientRect(), state.size)
-    const size = box.size * SHIP_LAYOUT.size
-    layoutPosition(box, SHIP_LAYOUT, group.position)
+    const encounter = gameStore.getState().boss
+    const combatGoal = encounter && ['warning', 'combat'].includes(encounter.stage) ? 1 : 0
+    combat.current = reducedMotion
+      ? combatGoal
+      : combat.current + (combatGoal - combat.current) * (1 - Math.exp(-dt * 4))
+    const compact = state.size.width < 1024
+    const size = box.size * SHIP_LAYOUT.size * (1 - (compact ? 0.24 : 0.16) * combat.current)
+    layoutPosition(
+      box,
+      {
+        x: SHIP_LAYOUT.x + (compact ? 0.13 : 0.025) * combat.current,
+        y: SHIP_LAYOUT.y - 0.045 * combat.current,
+        depth: SHIP_LAYOUT.depth,
+      },
+      group.position,
+    )
     if (!reducedMotion) group.position.y += Math.sin(time * 0.6) * 0.015 * size
     group.scale.setScalar((size / (2 * ship.radius)) * 1.18)
 

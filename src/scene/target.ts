@@ -12,3 +12,5 @@ export const asteroidOnScreen = {
   maxHp: 0,
   kind: 'rock' as 'rock' | 'crystal',
 }
+
+export const bossOnScreen = { x: 0, y: 0, radius: 0, visible: false }

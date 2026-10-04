@@ -90,10 +90,11 @@ describe('prestige pacing', () => {
     expect(catchUp).toBeLessThan(0.6 * 4 * HOUR)
   })
 
-  it('rewards longer runs with more dark matter per hour, up to a point', () => {
+  it('places the best reset window at four to six hours with the mounted arsenal', () => {
     const perHour = (hours: number) => darkMatterFor(at(hours)?.lifetime ?? 0) / hours
     expect(perHour(2)).toBeLessThan(perHour(4))
-    expect(perHour(4)).toBeLessThan(perHour(6))
+    expect(perHour(2)).toBeLessThan(perHour(6))
+    expect(perHour(12)).toBeLessThan(perHour(4))
     expect(perHour(12)).toBeLessThan(perHour(6))
   })
 })

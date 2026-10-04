@@ -69,6 +69,7 @@ export function flashMaterial(color: string, lens = false) {
     uColor: { value: new Color(color) },
     uAge: { value: 10 },
     uLens: { value: lens ? 1 : 0 },
+    uOpacity: { value: 1 },
   }
   return Object.assign(
     new ShaderMaterial({
@@ -84,6 +85,7 @@ export function flashMaterial(color: string, lens = false) {
       uniform vec3 uColor;
       uniform float uAge;
       uniform float uLens;
+      uniform float uOpacity;
       varying vec2 vUv;
       float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       float noise(vec2 p) {
@@ -102,13 +104,13 @@ export function flashMaterial(color: string, lens = false) {
           float filaments = pow(max(0.0, sin(angle * 5.0 + age * 9.0 + r * 22.0)), 3.0);
           float edge = orbit * (0.22 + 0.75 * filaments) * collapse;
           float silhouette = (1.0-smoothstep(radius-0.02, radius, r)) * collapse;
-          gl_FragColor = vec4(uColor * edge * 3.0 + vec3(0.002,0.001,0.008), clamp(silhouette + edge, 0.0, 1.0));
+          gl_FragColor = vec4(uColor * edge * 3.0 + vec3(0.002,0.001,0.008), clamp(silhouette + edge, 0.0, 1.0) * uOpacity);
         } else {
           float hot = exp(-r*r*65.0) * exp(-age*36.0);
           float fog = exp(-r*r*9.0) * exp(-age*13.0);
           float wisps = noise(p*9.0 + vec2(age*6.0, -age*3.0));
           vec3 radiance = vec3(1.0,0.94,0.82) * hot * 7.0 + uColor * fog * (0.25 + wisps*0.4);
-          gl_FragColor = vec4(radiance, 1.0);
+          gl_FragColor = vec4(radiance * uOpacity, 1.0);
         }
       }
     `,
